@@ -3,10 +3,7 @@
     <!--这个item是底部导航栏的触发按钮，具体触发回调在这个mainActivity的java代码中 -->
     <item android:id="@+id/house"
         android:icon="@drawable/ic_nav_house"
-        android:title="Home"/>
-    <item android:id="@+id/enjoy"
-        android:icon="@drawable/ic_nav_witing"
-        android:title="Enjoy"/>
+        android:title="Quality"/>
     <item android:id="@+id/more"
         android:icon="@drawable/ic_nav_operation_more"
         android:title="More"/>

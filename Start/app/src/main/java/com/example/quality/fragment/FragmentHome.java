@@ -1,13 +1,10 @@
 package com.example.quality.fragment;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -17,9 +14,6 @@ import com.example.quality.util.LogUtil;
 
 public class FragmentHome extends Fragment {
     private static final String TAG = "FragmentHome";
-
-    private Button buttonChange;
-    private boolean isOpen = true;
 
     @Override
     public void onAttach(@NonNull Context context) {
@@ -44,15 +38,6 @@ public class FragmentHome extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         LogUtil.d(TAG, "onViewCreated");
-        buttonChange = view.findViewById(com.example.quality.R.id.buttonChange);
-        buttonChange.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                isOpen = !isOpen;
-                Toast.makeText(getContext(), "点击了状态切换按钮", Toast.LENGTH_SHORT).show();
-                updateButtonState();
-            }
-        });
     }
 
     @Override
@@ -95,17 +80,5 @@ public class FragmentHome extends Fragment {
     public void onDetach() {
         super.onDetach();
         LogUtil.d(TAG, "onDetach");
-    }
-
-    private void updateButtonState() {
-        if (isOpen) {
-            buttonChange.setText("状态：开");
-            buttonChange.setBackgroundColor(Color.parseColor("#996699"));
-            buttonChange.setTextColor(Color.WHITE);
-        } else {
-            buttonChange.setText("状态：关");
-            buttonChange.setBackgroundColor(Color.parseColor("#999999"));
-            buttonChange.setTextColor(Color.BLACK);
-        }
     }
 }
