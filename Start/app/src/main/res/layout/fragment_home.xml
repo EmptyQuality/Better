@@ -90,10 +90,16 @@
 
             <CheckBox
                 android:id="@+id/checkExercise"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:buttonTint="#996699"
-                android:gravity="center" />
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_quality_check"
+                android:button="@null"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:text="✓"
+                android:textColor="@color/quality_check_text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
@@ -113,10 +119,16 @@
 
             <CheckBox
                 android:id="@+id/checkReading"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:buttonTint="#996699"
-                android:gravity="center" />
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_quality_check"
+                android:button="@null"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:text="✓"
+                android:textColor="@color/quality_check_text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
@@ -136,10 +148,16 @@
 
             <CheckBox
                 android:id="@+id/checkThinking"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:buttonTint="#996699"
-                android:gravity="center" />
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_quality_check"
+                android:button="@null"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:text="✓"
+                android:textColor="@color/quality_check_text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
@@ -159,10 +177,16 @@
 
             <CheckBox
                 android:id="@+id/checkSpeaking"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:buttonTint="#996699"
-                android:gravity="center" />
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_quality_check"
+                android:button="@null"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:text="✓"
+                android:textColor="@color/quality_check_text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
@@ -182,10 +206,16 @@
 
             <CheckBox
                 android:id="@+id/checkSleep"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:buttonTint="#996699"
-                android:gravity="center" />
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_quality_check"
+                android:button="@null"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:text="✓"
+                android:textColor="@color/quality_check_text"
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>
 
