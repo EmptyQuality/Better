@@ -2,4 +2,8 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="quality_primary">#F8C91C</color>
+    <color name="quality_primary_light">#FFF7D1</color>
+    <color name="quality_surface">#FFFFFF</color>
+    <color name="quality_background">#FAFAFA</color>
 </resources>

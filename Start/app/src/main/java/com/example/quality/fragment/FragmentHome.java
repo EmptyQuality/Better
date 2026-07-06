@@ -142,6 +142,7 @@ public class FragmentHome extends Fragment {
     private DatePickerDialog createDatePickerDialog(String title, LocalDate initialDate, DateSelectedCallback callback) {
         DatePickerDialog dialog = new DatePickerDialog(
                 requireContext(),
+                R.style.Theme_Quality_DatePicker,
                 (view, year, month, dayOfMonth) -> callback.onSelected(LocalDate.of(year, month + 1, dayOfMonth)),
                 initialDate.getYear(),
                 initialDate.getMonthValue() - 1,
@@ -364,17 +365,7 @@ public class FragmentHome extends Fragment {
     }
 
     private int readHabitValue(JSONObject habits, String habitName) {
-        Object value = habits.opt(habitName);
-        if (value instanceof Number) {
-            return ((Number) value).intValue() == 1 ? 1 : 0;
-        }
-        if (value instanceof Boolean) {
-            return (Boolean) value ? 1 : 0;
-        }
-        if ("1".equals(String.valueOf(value))) {
-            return 1;
-        }
-        return 0;
+        return habits.optInt(habitName, 0) == 1 ? 1 : 0;
     }
 
     private interface DateSelectedCallback {
