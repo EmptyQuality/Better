@@ -65,7 +65,11 @@ public class CountRepository {
         return null;
     }
 
-    public long addCategory(String name, String type, Long parentId) {
+    public long addCategory(String name, String type, String iconKey) {
+        return addCategory(name, type, iconKey, null);
+    }
+
+    public long addCategory(String name, String type, String iconKey, Long parentId) {
         SQLiteDatabase db = helper.getWritableDatabase();
         CountCategory parent = parentId == null ? null : getCategory(parentId);
         String finalType = parent == null ? type : parent.type;
@@ -73,7 +77,9 @@ public class CountRepository {
         if (existingId != null) {
             return existingId;
         }
-        String icon = parent == null ? firstIcon(name) : parent.icon;
+        String icon = parent == null
+                ? CategoryIconMapper.normalize(iconKey)
+                : CategoryIconMapper.normalize(parent.icon);
         int level = parent == null ? 1 : 2;
         int sortOrder = nextSortOrder(db, finalType, parentId);
         long now = System.currentTimeMillis();
@@ -119,6 +125,23 @@ public class CountRepository {
         values.put("created_at", now);
         values.put("updated_at", now);
         return db.insert(CountDatabaseHelper.TABLE_TRANSACTIONS, null, values);
+    }
+
+    public void updateTransaction(long id, String type, double amount, long categoryId, LocalDate date, String note) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        ContentValues values = new ContentValues();
+        values.put("type", type);
+        values.put("amount", amount);
+        values.put("category_id", categoryId);
+        values.put("happened_at", toMillis(date));
+        values.put("note", note);
+        values.put("updated_at", System.currentTimeMillis());
+        db.update(
+                CountDatabaseHelper.TABLE_TRANSACTIONS,
+                values,
+                "id = ?",
+                new String[]{String.valueOf(id)}
+        );
     }
 
     public int importTransactions(List<CountImportRecord> records) {
@@ -209,7 +232,7 @@ public class CountRepository {
     public List<CountTransaction> getTransactions(LocalDate start, LocalDate end) {
         SQLiteDatabase db = helper.getReadableDatabase();
         List<CountTransaction> transactions = new ArrayList<>();
-        String sql = "SELECT tx.id, tx.type, tx.amount, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
                 "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
                 "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
                 "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
@@ -224,11 +247,12 @@ public class CountRepository {
                         cursor.getLong(0),
                         cursor.getString(1),
                         cursor.getDouble(2),
-                        cursor.getString(3),
+                        cursor.getLong(3),
                         cursor.getString(4),
                         cursor.getString(5),
-                        fromMillis(cursor.getLong(6)),
-                        cursor.getString(7)
+                        cursor.getString(6),
+                        fromMillis(cursor.getLong(7)),
+                        cursor.getString(8)
                 ));
             }
         }
@@ -362,7 +386,7 @@ public class CountRepository {
         ContentValues values = new ContentValues();
         values.put("name", name);
         values.put("type", type);
-        values.put("icon", firstIcon(name));
+        values.put("icon", CategoryIconMapper.suggestedIcon(name, type));
         values.putNull("parent_id");
         values.put("level", 1);
         values.put("sort_order", nextSortOrder(db, type, null));
@@ -425,11 +449,4 @@ public class CountRepository {
         return leaf.isEmpty() ? name : leaf;
     }
 
-    private String firstIcon(String name) {
-        String trimmed = name == null ? "" : name.trim();
-        if (trimmed.isEmpty()) {
-            return "类";
-        }
-        return trimmed.substring(0, 1);
-    }
 }

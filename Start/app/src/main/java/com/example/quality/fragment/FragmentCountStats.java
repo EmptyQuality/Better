@@ -1,5 +1,6 @@
 package com.example.quality.fragment;
 
+import android.app.AlertDialog;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -9,6 +10,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -17,6 +19,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CategoryTotal;
 import com.example.quality.count.CountLineChartView;
 import com.example.quality.count.CountRepository;
@@ -32,19 +35,23 @@ import java.util.Locale;
 public class FragmentCountStats extends Fragment {
     private static final String TAG = "FragmentCountStats";
     private static final String TYPE_EXPENSE = "expense";
+    private static final String TYPE_INCOME = "income";
     private static final int COLOR_BEE = 0xFFF8C91C;
     private static final int COLOR_TEXT = 0xFF111827;
     private static final int COLOR_MUTED = 0xFF6B7280;
 
     private CountRepository repository;
     private String mode = "week";
+    private String currentType = TYPE_EXPENSE;
     private LocalDate anchor = LocalDate.now();
+    private TextView typeTitle;
     private TextView weekTab;
     private TextView monthTab;
     private TextView yearTab;
     private TextView periodLabel;
     private TextView totalValue;
     private TextView averageValue;
+    private TextView rankTitle;
     private CountLineChartView chartView;
     private LinearLayout rankingList;
 
@@ -78,19 +85,33 @@ public class FragmentCountStats extends Fragment {
 
         LinearLayout header = vertical();
         header.setBackgroundColor(COLOR_BEE);
-        header.setPadding(dp(18), dp(10), dp(18), dp(12));
-        TextView title = text("支出 ▼", 22, COLOR_TEXT, true);
-        title.setGravity(Gravity.CENTER);
-        header.addView(title);
+        header.setPadding(dp(12), dp(8), dp(12), dp(10));
+
+        LinearLayout titleRow = horizontal();
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = text("<", 24, COLOR_TEXT, true);
+        back.setGravity(Gravity.CENTER);
+        back.setOnClickListener(v -> requireActivity().getSupportFragmentManager().popBackStack());
+        titleRow.addView(back, fixed(dp(42), dp(42)));
+
+        typeTitle = text("", 20, COLOR_TEXT, true);
+        typeTitle.setGravity(Gravity.CENTER);
+        typeTitle.setOnClickListener(v -> showTypePicker());
+        titleRow.addView(typeTitle, new LinearLayout.LayoutParams(0, dp(42), 1));
+
+        View spacer = new View(requireContext());
+        titleRow.addView(spacer, fixed(dp(42), dp(42)));
+        header.addView(titleRow);
 
         LinearLayout tabs = horizontal();
-        tabs.setPadding(0, dp(12), 0, 0);
+        tabs.setGravity(Gravity.CENTER);
+        tabs.setPadding(0, dp(8), 0, 0);
         weekTab = tab("周", "week");
         monthTab = tab("月", "month");
         yearTab = tab("年", "year");
-        tabs.addView(weekTab, new LinearLayout.LayoutParams(0, dp(38), 1));
-        tabs.addView(monthTab, new LinearLayout.LayoutParams(0, dp(38), 1));
-        tabs.addView(yearTab, new LinearLayout.LayoutParams(0, dp(38), 1));
+        tabs.addView(weekTab, tabParams());
+        tabs.addView(monthTab, tabParams());
+        tabs.addView(yearTab, tabParams());
         header.addView(tabs);
         page.addView(header);
 
@@ -137,7 +158,7 @@ public class FragmentCountStats extends Fragment {
         chartParams.setMargins(0, dp(12), 0, dp(16));
         content.addView(chartView, chartParams);
 
-        TextView rankTitle = text("支出排行榜", 22, COLOR_TEXT, true);
+        rankTitle = text("", 18, COLOR_TEXT, true);
         rankTitle.setPadding(0, dp(2), 0, dp(12));
         content.addView(rankTitle);
         rankingList = vertical();
@@ -150,27 +171,30 @@ public class FragmentCountStats extends Fragment {
             return;
         }
         updateTabs();
+        updateTypeTitle();
         LocalDate start = rangeStart();
         LocalDate end = rangeEnd(start);
         periodLabel.setText(periodText(start, end));
         CountStats stats = repository.getStats(start, end);
-        double total = stats.expense;
+        boolean income = TYPE_INCOME.equals(currentType);
+        double total = income ? stats.income : stats.expense;
         int averageBy = averageDivisor(start, end);
-        totalValue.setText("总支出：" + repository.formatMoney(total));
+        totalValue.setText((income ? "总收入：" : "总支出：") + repository.formatMoney(total));
         averageValue.setText("平均值：" + repository.formatMoney(averageBy == 0 ? 0 : total / averageBy));
+        rankTitle.setText(income ? "收入排行榜" : "支出排行榜");
 
         List<CountSeriesPoint> points = "year".equals(mode)
-                ? repository.getExpenseTrendByMonth(start.getYear())
-                : repository.getExpenseTrendByDay(start, end);
+                ? getTrendByMonth(currentType, start.getYear())
+                : getTrendByDay(currentType, start, end);
         chartView.setPoints(points);
         renderRanking(start, end, total);
     }
 
     private void renderRanking(LocalDate start, LocalDate end, double total) {
         rankingList.removeAllViews();
-        List<CategoryTotal> totals = repository.getCategoryTotals(TYPE_EXPENSE, start, end);
+        List<CategoryTotal> totals = repository.getCategoryTotals(currentType, start, end);
         if (totals.isEmpty()) {
-            TextView empty = text("暂无支出", 16, COLOR_MUTED, false);
+            TextView empty = text(TYPE_INCOME.equals(currentType) ? "暂无收入" : "暂无支出", 15, COLOR_MUTED, false);
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(20), 0, dp(20));
             rankingList.addView(empty);
@@ -178,39 +202,53 @@ public class FragmentCountStats extends Fragment {
         }
         for (CategoryTotal item : totals) {
             LinearLayout row = vertical();
-            row.setPadding(0, dp(8), 0, dp(18));
+            row.setPadding(0, dp(6), 0, dp(10));
             LinearLayout top = horizontal();
             top.setGravity(Gravity.CENTER_VERTICAL);
-            top.addView(iconBubble(item.icon), fixed(dp(52), dp(52)));
-            TextView name = text(item.name, 20, COLOR_TEXT, true);
+            top.addView(iconBubble(item.icon), fixed(dp(40), dp(40)));
+            TextView name = text(item.name, 15, COLOR_TEXT, true);
             LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
-            nameParams.setMargins(dp(14), 0, dp(10), 0);
+            nameParams.setMargins(dp(10), 0, dp(8), 0);
             top.addView(name, nameParams);
             double percent = total <= 0 ? 0 : item.total * 100 / total;
             TextView amount = text(String.format(Locale.CHINA, "%.1f%%   %s",
-                    percent, repository.formatMoney(item.total)), 17, COLOR_TEXT, false);
+                    percent, repository.formatMoney(item.total)), 13, COLOR_TEXT, false);
             top.addView(amount);
             row.addView(top);
             View bar = new View(requireContext());
             bar.setBackground(round(COLOR_BEE, dp(4)));
             LinearLayout.LayoutParams barParams = new LinearLayout.LayoutParams(
                     Math.max(dp(10), (int) (getResources().getDisplayMetrics().widthPixels * 0.72f * percent / 100f)),
-                    dp(8)
+                    dp(5)
             );
-            barParams.setMargins(dp(66), dp(8), dp(10), 0);
+            barParams.setMargins(dp(50), dp(6), dp(10), 0);
             row.addView(bar, barParams);
             rankingList.addView(row);
         }
     }
 
     private TextView tab(String label, String targetMode) {
-        TextView tab = text(label, 16, COLOR_TEXT, true);
+        TextView tab = text(label, 14, COLOR_TEXT, true);
         tab.setGravity(Gravity.CENTER);
         tab.setOnClickListener(v -> {
             mode = targetMode;
             refreshStats();
         });
         return tab;
+    }
+
+    private void showTypePicker() {
+        String[] items = {"支出", "收入"};
+        new AlertDialog.Builder(requireContext())
+                .setItems(items, (dialog, which) -> {
+                    currentType = which == 0 ? TYPE_EXPENSE : TYPE_INCOME;
+                    refreshStats();
+                })
+                .show();
+    }
+
+    private void updateTypeTitle() {
+        typeTitle.setText((TYPE_INCOME.equals(currentType) ? "收入" : "支出") + " ▼");
     }
 
     private void updateTabs() {
@@ -221,7 +259,13 @@ public class FragmentCountStats extends Fragment {
 
     private void styleTab(TextView tab, boolean selected) {
         tab.setTextColor(selected ? COLOR_BEE : COLOR_TEXT);
-        tab.setBackground(round(selected ? 0xFF2F2D2D : COLOR_BEE, dp(0)));
+        tab.setBackground(round(selected ? 0xFF2F2D2D : COLOR_BEE, dp(8)));
+    }
+
+    private LinearLayout.LayoutParams tabParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(32));
+        params.setMargins(dp(6), 0, dp(6), 0);
+        return params;
     }
 
     private void movePeriod(boolean next) {
@@ -232,6 +276,30 @@ public class FragmentCountStats extends Fragment {
         } else {
             anchor = next ? anchor.plusWeeks(1) : anchor.minusWeeks(1);
         }
+    }
+
+    private List<CountSeriesPoint> getTrendByDay(String type, LocalDate start, LocalDate end) {
+        java.util.ArrayList<CountSeriesPoint> points = new java.util.ArrayList<>();
+        LocalDate day = start;
+        while (day.isBefore(end)) {
+            CountStats stats = repository.getStats(day, day.plusDays(1));
+            double value = TYPE_INCOME.equals(type) ? stats.income : stats.expense;
+            points.add(new CountSeriesPoint(String.format(Locale.CHINA, "%02d-%02d",
+                    day.getMonthValue(), day.getDayOfMonth()), value));
+            day = day.plusDays(1);
+        }
+        return points;
+    }
+
+    private List<CountSeriesPoint> getTrendByMonth(String type, int year) {
+        java.util.ArrayList<CountSeriesPoint> points = new java.util.ArrayList<>();
+        for (int month = 1; month <= 12; month++) {
+            LocalDate start = LocalDate.of(year, month, 1);
+            CountStats stats = repository.getStats(start, start.plusMonths(1));
+            double value = TYPE_INCOME.equals(type) ? stats.income : stats.expense;
+            points.add(new CountSeriesPoint(String.format(Locale.CHINA, "%02d月", month), value));
+        }
+        return points;
     }
 
     private LocalDate rangeStart() {
@@ -281,10 +349,13 @@ public class FragmentCountStats extends Fragment {
         return button;
     }
 
-    private TextView iconBubble(String icon) {
-        TextView bubble = text(icon == null || icon.isEmpty() ? "类" : icon, 18, COLOR_TEXT, true);
-        bubble.setGravity(Gravity.CENTER);
-        bubble.setBackground(round(0xFFF3F4F6, dp(26)));
+    private ImageView iconBubble(String icon) {
+        ImageView bubble = new ImageView(requireContext());
+        bubble.setImageResource(CategoryIconMapper.drawableResId(requireContext(), icon));
+        bubble.setColorFilter(COLOR_TEXT);
+        bubble.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        bubble.setPadding(dp(9), dp(9), dp(9), dp(9));
+        bubble.setBackground(round(0xFFF3F4F6, dp(20)));
         return bubble;
     }
 

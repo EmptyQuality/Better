@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class CountDatabaseHelper extends SQLiteOpenHelper {
     public static final String DATABASE_NAME = "better_count.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2;
 
     public static final String TABLE_CATEGORIES = "count_categories";
     public static final String TABLE_TRANSACTIONS = "count_transactions";
@@ -60,26 +60,25 @@ public class CountDatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Version 1 is the first Count schema. Future schema changes should migrate here.
+        db.execSQL("DROP TABLE IF EXISTS " + TABLE_TRANSACTIONS);
+        db.execSQL("DROP TABLE IF EXISTS " + TABLE_CATEGORIES);
+        onCreate(db);
     }
 
     private void seedDefaultCategories(SQLiteDatabase db) {
-        long food = insertCategory(db, "餐饮", "expense", "餐", null, 1, 10);
-        insertCategory(db, "吃饭", "expense", "餐", food, 2, 11);
-        insertCategory(db, "饮品", "expense", "餐", food, 2, 12);
-        insertCategory(db, "交通", "expense", "行", null, 1, 20);
-        insertCategory(db, "购物", "expense", "购", null, 1, 30);
-        insertCategory(db, "居家", "expense", "家", null, 1, 40);
-        insertCategory(db, "娱乐", "expense", "乐", null, 1, 50);
-        insertCategory(db, "医疗", "expense", "医", null, 1, 60);
-        insertCategory(db, "学习", "expense", "学", null, 1, 70);
-        insertCategory(db, "其他支出", "expense", "其", null, 1, 90);
+        insertCategory(db, "餐饮", "expense", "food", null, 1, 10);
+        insertCategory(db, "交通", "expense", "car", null, 1, 20);
+        insertCategory(db, "购物", "expense", "goods", null, 1, 30);
+        insertCategory(db, "医疗", "expense", "medic", null, 1, 40);
+        insertCategory(db, "学习", "expense", "learning", null, 1, 50);
+        insertCategory(db, "水电费", "expense", "bottle", null, 1, 60);
+        insertCategory(db, "服饰", "expense", "cloth", null, 1, 70);
+        insertCategory(db, "数码", "expense", "digital", null, 1, 80);
+        insertCategory(db, "日用", "expense", "tissue", null, 1, 90);
+        insertCategory(db, "书籍", "expense", "book", null, 1, 100);
 
-        insertCategory(db, "工资", "income", "薪", null, 1, 10);
-        insertCategory(db, "奖金", "income", "奖", null, 1, 20);
-        insertCategory(db, "兼职", "income", "工", null, 1, 30);
-        insertCategory(db, "投资", "income", "投", null, 1, 40);
-        insertCategory(db, "其他收入", "income", "其", null, 1, 90);
+        insertCategory(db, "工资", "income", "salary", null, 1, 10);
+        insertCategory(db, "兼职", "income", "parttime_job", null, 1, 20);
     }
 
     private long insertCategory(

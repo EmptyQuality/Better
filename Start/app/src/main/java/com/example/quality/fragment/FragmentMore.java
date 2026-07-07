@@ -1,10 +1,10 @@
 package com.example.quality.fragment;
 
 import android.app.AlertDialog;
-import android.app.DatePickerDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -12,13 +12,12 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.NumberPicker;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -29,6 +28,7 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.example.quality.R;
+import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CountCategory;
 import com.example.quality.count.CountImportResult;
 import com.example.quality.count.CountImportService;
@@ -39,6 +39,7 @@ import com.example.quality.util.LogUtil;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,9 +68,12 @@ public class FragmentMore extends Fragment {
 
     private static class CategorySelection {
         List<CountCategory> categories = new ArrayList<>();
+        CountCategory selectedCategory;
+        Long preferredCategoryId;
     }
 
     private static class EntryDraft {
+        Long editingId;
         String type = TYPE_EXPENSE;
         String amount = "";
         LocalDate date = LocalDate.now();
@@ -200,7 +204,7 @@ public class FragmentMore extends Fragment {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(4), dp(10), dp(4), dp(10));
         row.setOnLongClickListener(v -> {
-            confirmDeleteTransaction(tx);
+            showTransactionActions(tx);
             return true;
         });
 
@@ -243,33 +247,69 @@ public class FragmentMore extends Fragment {
     }
 
     private void showMonthPicker() {
-        DatePickerDialog dialog = new DatePickerDialog(
-                requireContext(),
-                R.style.Theme_Quality_DatePicker,
-                (view, year, month, dayOfMonth) -> {
-                    selectedMonth = LocalDate.of(year, month + 1, 1);
+        LinearLayout content = horizontal();
+        content.setGravity(Gravity.CENTER);
+        content.setPadding(dp(8), dp(18), dp(8), dp(18));
+
+        NumberPicker yearPicker = datePicker(selectedMonth.getYear() - 5, selectedMonth.getYear() + 5);
+        yearPicker.setValue(selectedMonth.getYear());
+        NumberPicker monthPicker = datePicker(1, 12);
+        monthPicker.setFormatter(value -> String.format(Locale.CHINA, "%02d", value));
+        monthPicker.setValue(selectedMonth.getMonthValue());
+
+        content.addView(yearPicker, new LinearLayout.LayoutParams(0, dp(146), 1));
+        content.addView(monthPicker, new LinearLayout.LayoutParams(0, dp(146), 1));
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("选择月份")
+                .setView(content)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("确定", (dialog, which) -> {
+                    selectedMonth = LocalDate.of(yearPicker.getValue(), monthPicker.getValue(), 1);
                     refreshMonthView();
-                },
-                selectedMonth.getYear(),
-                selectedMonth.getMonthValue() - 1,
-                1
-        );
-        dialog.setTitle("选择月份");
-        dialog.show();
+                })
+                .show();
     }
 
     private void showEntrySheet() {
+        showEntrySheet(null);
+    }
+
+    private void showEntrySheet(@Nullable CountTransaction editingTx) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
         EntryDraft draft = new EntryDraft();
-        draft.date = LocalDate.now();
+        if (editingTx == null) {
+            draft.date = LocalDate.now();
+        } else {
+            draft.editingId = editingTx.id;
+            draft.type = editingTx.type;
+            draft.amount = amountInputText(editingTx.amount);
+            draft.date = editingTx.date;
+        }
 
         LinearLayout sheet = vertical();
         sheet.setPadding(dp(18), dp(14), dp(18), dp(18));
         sheet.setBackgroundColor(0xFFFFFFFF);
 
+        CategorySelection categorySelection = new CategorySelection();
+        if (editingTx != null) {
+            categorySelection.preferredCategoryId = editingTx.categoryId;
+        }
+        LinearLayout amountRow = horizontal();
+        amountRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout categoryRow = buildCategoryAmountRow(categorySelection);
+        amountRow.addView(categoryRow, new LinearLayout.LayoutParams(0, dp(38), 1));
+
         TextView amountDisplay = text("+ 0", 22, COLOR_TEXT, true);
-        amountDisplay.setGravity(Gravity.END);
-        sheet.addView(amountDisplay);
+        amountDisplay.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams amountParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(38)
+        );
+        amountParams.setMargins(dp(10), 0, 0, 0);
+        amountRow.addView(amountDisplay, amountParams);
+        sheet.addView(amountRow);
 
         LinearLayout typeRow = horizontal();
         typeRow.setPadding(0, dp(8), 0, 0);
@@ -279,20 +319,11 @@ public class FragmentMore extends Fragment {
         typeRow.addView(incomeButton, new LinearLayout.LayoutParams(0, dp(40), 1));
         sheet.addView(typeRow);
 
-        Spinner categorySpinner = new Spinner(requireContext());
-        CategorySelection categorySelection = new CategorySelection();
-        ArrayAdapter<String> categoryAdapter = new ArrayAdapter<>(
-                requireContext(),
-                android.R.layout.simple_spinner_dropdown_item,
-                new ArrayList<>()
-        );
-        categorySpinner.setAdapter(categoryAdapter);
-        LinearLayout.LayoutParams spinnerParams = matchWrap();
-        spinnerParams.setMargins(0, dp(10), 0, 0);
-        sheet.addView(categorySpinner, spinnerParams);
-
         EditText noteInput = new EditText(requireContext());
         noteInput.setHint("备注...");
+        if (editingTx != null && editingTx.note != null) {
+            noteInput.setText(editingTx.note);
+        }
         noteInput.setSingleLine(true);
         noteInput.setTextColor(COLOR_TEXT);
         noteInput.setHintTextColor(0xFF9CA3AF);
@@ -304,12 +335,12 @@ public class FragmentMore extends Fragment {
 
         TextView dateButton = keypadButton(formatSheetDate(draft.date), 12, false);
         Runnable refreshCategories = () -> {
-            fillCategorySpinner(draft.type, categorySelection, categoryAdapter);
-            if (categoryAdapter.getCount() > 0) {
-                categorySpinner.setSelection(0);
-            }
+            fillCategorySelection(draft.type, categorySelection);
+            renderCategoryAmountRow(categoryRow, categorySelection);
         };
         refreshCategories.run();
+        updateTypeChips(expenseButton, incomeButton, TYPE_INCOME.equals(draft.type));
+        updateAmountDisplay(amountDisplay, draft);
 
         expenseButton.setOnClickListener(v -> {
             draft.type = TYPE_EXPENSE;
@@ -325,7 +356,7 @@ public class FragmentMore extends Fragment {
         });
 
         sheet.addView(buildKeypad(dialog, draft, amountDisplay, dateButton,
-                categorySpinner, categorySelection, noteInput, expenseButton, incomeButton, refreshCategories));
+                categorySelection, noteInput, expenseButton, incomeButton, refreshCategories));
         dialog.setContentView(sheet);
         dialog.show();
     }
@@ -335,7 +366,6 @@ public class FragmentMore extends Fragment {
             EntryDraft draft,
             TextView amountDisplay,
             TextView dateButton,
-            Spinner categorySpinner,
             CategorySelection categorySelection,
             EditText noteInput,
             TextView expenseButton,
@@ -350,12 +380,21 @@ public class FragmentMore extends Fragment {
                 {"7", "8", "9"},
                 {"4", "5", "6"},
                 {"1", "2", "3"},
-                {".", "0", "×"}
+                {".", "0", "back"}
         };
         for (String[] rowValues : rows) {
             LinearLayout row = horizontal();
             for (String value : rowValues) {
-                TextView key = keypadButton(value, 18, "0".equals(value) || "2".equals(value));
+                TextView key = keypadButton(value, 18, false);
+                if ("back".equals(value)) {
+                    key.setText("");
+                    Drawable backIcon = requireContext().getDrawable(R.drawable.ic_back);
+                    if (backIcon != null) {
+                        backIcon.setBounds(0, 0, dp(24), dp(24));
+                        backIcon.setTint(COLOR_TEXT);
+                        key.setCompoundDrawables(null, backIcon, null, null);
+                    }
+                }
                 key.setOnClickListener(v -> handleAmountKey(draft, value, amountDisplay));
                 row.addView(key, keypadCell());
             }
@@ -391,7 +430,7 @@ public class FragmentMore extends Fragment {
         TextView done = keypadButton("完成", 15, true);
         done.setTextColor(COLOR_TEXT);
         done.setBackground(round(COLOR_BEE, dp(12)));
-        done.setOnClickListener(v -> saveEntry(dialog, draft, categorySpinner, categorySelection, noteInput));
+        done.setOnClickListener(v -> saveEntry(dialog, draft, categorySelection, noteInput));
         actions.addView(done, fixed(dp(66), dp(54)));
 
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(
@@ -404,7 +443,7 @@ public class FragmentMore extends Fragment {
     }
 
     private void handleAmountKey(EntryDraft draft, String key, TextView amountDisplay) {
-        if ("×".equals(key)) {
+        if ("back".equals(key)) {
             if (!draft.amount.isEmpty()) {
                 draft.amount = draft.amount.substring(0, draft.amount.length() - 1);
             }
@@ -428,10 +467,20 @@ public class FragmentMore extends Fragment {
         amountDisplay.setTextColor(TYPE_INCOME.equals(draft.type) ? COLOR_GREEN : COLOR_TEXT);
     }
 
+    private String amountInputText(double amount) {
+        String value = String.format(Locale.US, "%.2f", amount);
+        if (value.endsWith(".00")) {
+            return value.substring(0, value.length() - 3);
+        }
+        if (value.endsWith("0")) {
+            return value.substring(0, value.length() - 1);
+        }
+        return value;
+    }
+
     private void saveEntry(
             BottomSheetDialog dialog,
             EntryDraft draft,
-            Spinner categorySpinner,
             CategorySelection categorySelection,
             EditText noteInput
     ) {
@@ -447,64 +496,199 @@ public class FragmentMore extends Fragment {
             return;
         }
         if (categorySelection.categories.isEmpty()) {
-            Toast.makeText(requireContext(), "没有可用分类", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), "没有可用类别", Toast.LENGTH_SHORT).show();
             return;
         }
-        CountCategory category = categorySelection.categories.get(categorySpinner.getSelectedItemPosition());
-        repository.addTransaction(
-                draft.type,
-                amount,
-                category.id,
-                draft.date,
-                noteInput.getText().toString().trim()
-        );
+        if (categorySelection.selectedCategory == null) {
+            Toast.makeText(requireContext(), "请选择类别", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CountCategory category = categorySelection.selectedCategory;
+        if (draft.editingId == null) {
+            repository.addTransaction(
+                    draft.type,
+                    amount,
+                    category.id,
+                    draft.date,
+                    noteInput.getText().toString().trim()
+            );
+        } else {
+            repository.updateTransaction(
+                    draft.editingId,
+                    draft.type,
+                    amount,
+                    category.id,
+                    draft.date,
+                    noteInput.getText().toString().trim()
+            );
+        }
         selectedMonth = draft.date.withDayOfMonth(1);
         refreshMonthView();
         dialog.dismiss();
     }
 
-    private void fillCategorySpinner(
-            String type,
-            CategorySelection selection,
-            ArrayAdapter<String> adapter
-    ) {
+    private void fillCategorySelection(String type, CategorySelection selection) {
         selection.categories = repository.getCategories(type);
-        adapter.clear();
-        for (CountCategory category : selection.categories) {
-            adapter.add(category.displayName());
+        selection.selectedCategory = null;
+        if (selection.preferredCategoryId != null) {
+            for (CountCategory category : selection.categories) {
+                if (category.id == selection.preferredCategoryId) {
+                    selection.selectedCategory = category;
+                    break;
+                }
+            }
+            selection.preferredCategoryId = null;
         }
-        adapter.notifyDataSetChanged();
+        if (selection.selectedCategory == null && !selection.categories.isEmpty()) {
+            selection.selectedCategory = selection.categories.get(0);
+        }
+    }
+
+    private LinearLayout buildCategoryAmountRow(CategorySelection selection) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, 0, dp(8), 0);
+        row.setOnClickListener(v -> showCategoryPicker(selection, () -> renderCategoryAmountRow(row, selection)));
+        return row;
+    }
+
+    private void renderCategoryAmountRow(LinearLayout row, CategorySelection selection) {
+        row.removeAllViews();
+        CountCategory category = selection.selectedCategory;
+        if (category == null) {
+            ImageView emptyIcon = plainIcon(CategoryIconMapper.DEFAULT_ICON, 24);
+            emptyIcon.setBackground(round(0xFFFFF7D1, dp(18)));
+            emptyIcon.setPadding(dp(7), dp(7), dp(7), dp(7));
+            row.addView(emptyIcon, fixed(dp(36), dp(36)));
+            TextView empty = text("暂无类别", 14, COLOR_MUTED, false);
+            LinearLayout.LayoutParams emptyParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            emptyParams.setMargins(dp(8), 0, 0, 0);
+            row.addView(empty, emptyParams);
+            return;
+        }
+
+        ImageView icon = plainIcon(category.icon, 24);
+        icon.setBackground(round(0xFFFFF7D1, dp(18)));
+        icon.setPadding(dp(7), dp(7), dp(7), dp(7));
+        row.addView(icon, fixed(dp(36), dp(36)));
+        TextView name = text(category.name, 15, COLOR_TEXT, true);
+        name.setSingleLine(true);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        nameParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(name, nameParams);
+    }
+
+    private void showCategoryPicker(CategorySelection selection, Runnable onSelected) {
+        LinearLayout list = vertical();
+        list.setPadding(dp(8), dp(4), dp(8), dp(4));
+        ScrollView scrollView = new ScrollView(requireContext());
+        scrollView.addView(list);
+        final AlertDialog[] holder = new AlertDialog[1];
+
+        for (CountCategory category : selection.categories) {
+            LinearLayout row = horizontal();
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            row.addView(plainIcon(category.icon, 24), fixed(dp(34), dp(34)));
+            TextView name = text(category.displayName().trim(), 15, COLOR_TEXT, false);
+            LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+            nameParams.setMargins(dp(10), 0, dp(8), 0);
+            row.addView(name, nameParams);
+            row.setOnClickListener(v -> {
+                selection.selectedCategory = category;
+                onSelected.run();
+                if (holder[0] != null) {
+                    holder[0].dismiss();
+                }
+            });
+            list.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    dp(50)
+            ));
+        }
+
+        holder[0] = new AlertDialog.Builder(requireContext())
+                .setTitle("选择类别")
+                .setView(scrollView)
+                .setNegativeButton("取消", null)
+                .create();
+        holder[0].show();
     }
 
     private void showDateStepDialog(EntryDraft draft, TextView dateButton) {
+        LocalDate initialDate = draft.date;
         LinearLayout content = horizontal();
         content.setGravity(Gravity.CENTER);
-        content.setPadding(dp(8), dp(8), dp(8), dp(8));
+        content.setPadding(dp(8), dp(18), dp(8), dp(18));
 
-        Button prev = plainButton("前一天");
-        TextView date = text(formatSheetDate(draft.date), 15, COLOR_TEXT, true);
-        date.setGravity(Gravity.CENTER);
-        Button next = plainButton("后一天");
-        content.addView(prev, new LinearLayout.LayoutParams(0, dp(48), 1));
-        content.addView(date, new LinearLayout.LayoutParams(0, dp(48), 1));
-        content.addView(next, new LinearLayout.LayoutParams(0, dp(48), 1));
+        NumberPicker yearPicker = datePicker(initialDate.getYear() - 5, initialDate.getYear() + 5);
+        yearPicker.setValue(initialDate.getYear());
 
-        AlertDialog dateDialog = new AlertDialog.Builder(requireContext())
-                .setTitle("切换日期")
+        NumberPicker monthPicker = datePicker(1, 12);
+        monthPicker.setFormatter(value -> String.format(Locale.CHINA, "%02d", value));
+        monthPicker.setValue(initialDate.getMonthValue());
+
+        NumberPicker dayPicker = datePicker(1, YearMonth.from(initialDate).lengthOfMonth());
+        dayPicker.setFormatter(value -> String.format(Locale.CHINA, "%02d", value));
+        dayPicker.setValue(initialDate.getDayOfMonth());
+
+        NumberPicker.OnValueChangeListener rangeListener =
+                (picker, oldValue, newValue) -> updateDayPickerRange(yearPicker, monthPicker, dayPicker);
+        yearPicker.setOnValueChangedListener(rangeListener);
+        monthPicker.setOnValueChangedListener(rangeListener);
+
+        content.addView(yearPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
+        content.addView(monthPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
+        content.addView(dayPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("选择日期")
                 .setView(content)
-                .setPositiveButton("完成", null)
-                .create();
-        prev.setOnClickListener(v -> {
-            draft.date = draft.date.minusDays(1);
-            date.setText(formatSheetDate(draft.date));
-            dateButton.setText(formatSheetDate(draft.date));
-        });
-        next.setOnClickListener(v -> {
-            draft.date = draft.date.plusDays(1);
-            date.setText(formatSheetDate(draft.date));
-            dateButton.setText(formatSheetDate(draft.date));
-        });
-        dateDialog.show();
+                .setNegativeButton("取消", null)
+                .setPositiveButton("确定", (dialog, which) -> {
+                    draft.date = LocalDate.of(
+                            yearPicker.getValue(),
+                            monthPicker.getValue(),
+                            dayPicker.getValue()
+                    );
+                    dateButton.setText(formatSheetDate(draft.date));
+                })
+                .show();
+    }
+
+    private NumberPicker datePicker(int min, int max) {
+        NumberPicker picker = new NumberPicker(requireContext());
+        picker.setMinValue(min);
+        picker.setMaxValue(max);
+        picker.setWrapSelectorWheel(false);
+        picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        return picker;
+    }
+
+    private void updateDayPickerRange(NumberPicker yearPicker, NumberPicker monthPicker, NumberPicker dayPicker) {
+        int maxDay = YearMonth.of(yearPicker.getValue(), monthPicker.getValue()).lengthOfMonth();
+        if (dayPicker.getValue() > maxDay) {
+            dayPicker.setValue(maxDay);
+        }
+        dayPicker.setMaxValue(maxDay);
+    }
+
+    private void showTransactionActions(CountTransaction tx) {
+        new AlertDialog.Builder(requireContext())
+                .setItems(new String[]{"修改", "删除"}, (dialog, which) -> {
+                    if (which == 0) {
+                        showEntrySheet(tx);
+                    } else {
+                        confirmDeleteTransaction(tx);
+                    }
+                })
+                .show();
     }
 
     private void confirmDeleteTransaction(CountTransaction tx) {
@@ -524,6 +708,14 @@ public class FragmentMore extends Fragment {
                 .beginTransaction()
                 .replace(R.id.container, new FragmentCountStats())
                 .addToBackStack("count_stats")
+                .commit();
+    }
+
+    private void openCategoryManageFragment() {
+        requireActivity().getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.container, new FragmentCategoryManage())
+                .addToBackStack("category_manage")
                 .commit();
     }
 
@@ -587,7 +779,7 @@ public class FragmentMore extends Fragment {
         refreshMonthView();
 
         StringBuilder message = new StringBuilder();
-        message.append("已导入 ").append(result.insertedRows).append(" 笔");
+        message.append("已导入 ").append(result.insertedRows).append(" 条");
         if (result.skippedRows > 0) {
             message.append("\n跳过 ").append(result.skippedRows).append(" 行");
         }
@@ -642,16 +834,6 @@ public class FragmentMore extends Fragment {
         return params;
     }
 
-    private Button plainButton(String label) {
-        Button button = new Button(requireContext());
-        button.setText(label);
-        button.setAllCaps(false);
-        button.setTextColor(COLOR_TEXT);
-        button.setTextSize(13);
-        button.setBackground(round(0xFFF3F4F6, dp(12)));
-        return button;
-    }
-
     private LinearLayout buildFloatingActionCard() {
         LinearLayout card = horizontal();
         card.setGravity(Gravity.CENTER);
@@ -660,6 +842,7 @@ public class FragmentMore extends Fragment {
         card.setElevation(dp(6));
         card.addView(actionCardButton("图表", false, v -> openStatsFragment()), fixed(dp(48), dp(40)));
         card.addView(actionCardButton("导入", false, v -> showImportDialog()), fixed(dp(48), dp(40)));
+        card.addView(actionCardButton("类别", false, v -> openCategoryManageFragment()), fixed(dp(48), dp(40)));
         card.addView(actionCardButton("+", true, v -> showEntrySheet()), fixed(dp(48), dp(40)));
         return card;
     }
@@ -673,16 +856,26 @@ public class FragmentMore extends Fragment {
     }
 
     private FrameLayout.LayoutParams actionCardParams() {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(152), dp(48), Gravity.BOTTOM | Gravity.END);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(200), dp(48), Gravity.BOTTOM | Gravity.END);
         params.setMargins(dp(18), dp(18), dp(18), dp(18));
         return params;
     }
 
-    private TextView iconBubble(String icon) {
-        TextView bubble = text(icon == null || icon.isEmpty() ? "类" : icon, 14, COLOR_TEXT, true);
-        bubble.setGravity(Gravity.CENTER);
+    private ImageView iconBubble(String icon) {
+        ImageView bubble = plainIcon(icon, 22);
         bubble.setBackground(round(0xFFFFF7D1, dp(20)));
+        bubble.setPadding(dp(8), dp(8), dp(8), dp(8));
         return bubble;
+    }
+
+    private ImageView plainIcon(String icon, int sizeDp) {
+        ImageView image = new ImageView(requireContext());
+        image.setImageResource(CategoryIconMapper.drawableResId(requireContext(), icon));
+        image.setColorFilter(COLOR_TEXT);
+        image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        image.setMinimumWidth(dp(sizeDp));
+        image.setMinimumHeight(dp(sizeDp));
+        return image;
     }
 
     private TextView text(String value, int sp, int color, boolean bold) {
@@ -772,3 +965,4 @@ public class FragmentMore extends Fragment {
         LogUtil.d(TAG, "onDetach");
     }
 }
+

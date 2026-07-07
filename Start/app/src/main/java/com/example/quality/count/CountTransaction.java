@@ -6,6 +6,7 @@ public class CountTransaction {
     public final long id;
     public final String type;
     public final double amount;
+    public final long categoryId;
     public final String categoryName;
     public final String parentCategoryName;
     public final String categoryIcon;
@@ -16,6 +17,7 @@ public class CountTransaction {
             long id,
             String type,
             double amount,
+            long categoryId,
             String categoryName,
             String parentCategoryName,
             String categoryIcon,
@@ -25,6 +27,7 @@ public class CountTransaction {
         this.id = id;
         this.type = type;
         this.amount = amount;
+        this.categoryId = categoryId;
         this.categoryName = categoryName;
         this.parentCategoryName = parentCategoryName;
         this.categoryIcon = categoryIcon;
