@@ -6,5 +6,5 @@
         android:title="Quality"/>
     <item android:id="@+id/more"
         android:icon="@drawable/ic_nav_operation_more"
-        android:title="More"/>
+        android:title="Count"/>
 </menu>
