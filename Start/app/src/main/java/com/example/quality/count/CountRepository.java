@@ -8,24 +8,38 @@ import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.provider.OpenableColumns;
 
+import com.github.junrar.Archive;
+import com.github.junrar.rarfile.FileHeader;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class CountRepository {
     private static final String CUSTOM_ICON_DIR = "category_icons";
     private static final String CUSTOM_ICON_SOURCE_SINGLE = "single";
+    private static final String CUSTOM_ICON_SOURCE_PACK = "pack";
     private static final long MAX_CUSTOM_ICON_BYTES = 2 * 1024 * 1024;
+    private static final long MAX_ICON_PACK_BYTES = 30 * 1024 * 1024;
 
     private final Context appContext;
     private final CountDatabaseHelper helper;
@@ -534,6 +548,106 @@ public class CountRepository {
         deleteFileQuietly(customIconFile(existing.fileName));
     }
 
+    public List<CountCustomIcon> importCustomIconPack(Uri uri) throws IOException {
+        if (uri == null) {
+            throw new IOException("Icon pack uri is empty");
+        }
+        String displayName = readDisplayName(uri);
+        String packId = "pack_" + UUID.randomUUID().toString().replace("-", "");
+        String packName = labelFromDisplayName(displayName);
+        int packVersion = 1;
+        ArchiveIconPackData archiveData = isRarFileName(displayName)
+                ? readRarIconPack(uri)
+                : readZipIconPack(uri);
+        String manifestText = archiveData.manifestText;
+        List<PackedIconFile> packedIcons = archiveData.icons;
+
+        Map<String, String> manifestLabels = new HashMap<>();
+        if (manifestText != null && !manifestText.trim().isEmpty()) {
+            try {
+                JSONObject manifest = new JSONObject(manifestText);
+                String manifestName = manifest.optString("name", "").trim();
+                if (!manifestName.isEmpty()) {
+                    packName = manifestName;
+                }
+                packVersion = Math.max(1, manifest.optInt("version", 1));
+                JSONArray icons = manifest.optJSONArray("icons");
+                if (icons != null) {
+                    for (int i = 0; i < icons.length(); i++) {
+                        JSONObject icon = icons.optJSONObject(i);
+                        if (icon == null) {
+                            continue;
+                        }
+                        String file = normalizeZipEntryName(icon.optString("file", ""));
+                        String label = icon.optString("label", icon.optString("name", "")).trim();
+                        if (!file.isEmpty() && !label.isEmpty()) {
+                            manifestLabels.put(file, label);
+                        }
+                    }
+                }
+            } catch (JSONException e) {
+                throw new IOException("Cannot parse icon pack manifest", e);
+            }
+        }
+        if (packedIcons.isEmpty()) {
+            throw new IOException("Icon pack does not contain supported images");
+        }
+        if (packName.isEmpty()) {
+            packName = "图标包";
+        }
+
+        SQLiteDatabase db = helper.getWritableDatabase();
+        long now = System.currentTimeMillis();
+        ContentValues packValues = new ContentValues();
+        packValues.put("id", packId);
+        packValues.put("name", packName);
+        packValues.put("version", packVersion);
+        packValues.put("created_at", now);
+
+        List<CountCustomIcon> imported = new ArrayList<>();
+        db.beginTransaction();
+        try {
+            db.insert(CountDatabaseHelper.TABLE_ICON_PACKS, null, packValues);
+            for (PackedIconFile packedIcon : packedIcons) {
+                if (BitmapFactory.decodeByteArray(packedIcon.bytes, 0, packedIcon.bytes.length) == null) {
+                    continue;
+                }
+                String id = "icon_" + UUID.randomUUID().toString().replace("-", "");
+                String fileName = id + extensionFromName(packedIcon.name);
+                if (extensionFromName(fileName).isEmpty()) {
+                    fileName = id + ".png";
+                }
+                File target = customIconFile(fileName);
+                File parent = target.getParentFile();
+                if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                    throw new IOException("Cannot create icon directory");
+                }
+                try (FileOutputStream output = new FileOutputStream(target)) {
+                    output.write(packedIcon.bytes);
+                }
+                String label = manifestLabels.containsKey(packedIcon.name)
+                        ? manifestLabels.get(packedIcon.name)
+                        : labelFromEntryName(packedIcon.name);
+                ContentValues values = new ContentValues();
+                values.put("id", id);
+                values.put("label", label.isEmpty() ? "自定义图标" : label);
+                values.put("file_name", fileName);
+                values.put("source", CUSTOM_ICON_SOURCE_PACK);
+                values.put("pack_id", packId);
+                values.put("created_at", now);
+                db.insert(CountDatabaseHelper.TABLE_CUSTOM_ICONS, null, values);
+                imported.add(new CountCustomIcon(id, label, fileName, CUSTOM_ICON_SOURCE_PACK, packId));
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        if (imported.isEmpty()) {
+            throw new IOException("Icon pack images cannot be decoded");
+        }
+        return imported;
+    }
+
     public List<CountSeriesPoint> getExpenseTrendByDay(LocalDate start, LocalDate end) {
         List<CountSeriesPoint> points = new ArrayList<>();
         LocalDate day = start;
@@ -689,6 +803,110 @@ public class CountRepository {
         return output.toByteArray();
     }
 
+    private byte[] readZipEntryBytes(InputStream input, long maxBytes) throws IOException {
+        return readLimitedBytes(input, maxBytes);
+    }
+
+    private ArchiveIconPackData readZipIconPack(Uri uri) throws IOException {
+        String manifestText = null;
+        List<PackedIconFile> packedIcons = new ArrayList<>();
+        try (InputStream input = appContext.getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Cannot open selected icon pack");
+            }
+            ZipInputStream zip = new ZipInputStream(input);
+            ZipEntry entry;
+            long totalBytes = 0;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                String name = normalizeZipEntryName(entry.getName());
+                if (name.isEmpty()) {
+                    continue;
+                }
+                byte[] bytes = readZipEntryBytes(zip, MAX_CUSTOM_ICON_BYTES);
+                totalBytes += bytes.length;
+                if (totalBytes > MAX_ICON_PACK_BYTES) {
+                    throw new IOException("Icon pack is too large");
+                }
+                if ("manifest.json".equalsIgnoreCase(name) || name.endsWith("/manifest.json")) {
+                    manifestText = new String(bytes, StandardCharsets.UTF_8);
+                } else if (isSupportedIconEntry(name)) {
+                    packedIcons.add(new PackedIconFile(name, bytes));
+                }
+            }
+        }
+        return new ArchiveIconPackData(manifestText, packedIcons);
+    }
+
+    private ArchiveIconPackData readRarIconPack(Uri uri) throws IOException {
+        String manifestText = null;
+        List<PackedIconFile> packedIcons = new ArrayList<>();
+        try (InputStream input = appContext.getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Cannot open selected icon pack");
+            }
+            try (Archive archive = new Archive(input)) {
+                FileHeader header;
+                long totalBytes = 0;
+                while ((header = archive.nextFileHeader()) != null) {
+                    if (header.isDirectory()) {
+                        continue;
+                    }
+                    String name = normalizeZipEntryName(header.getFileName());
+                    if (name.isEmpty()) {
+                        continue;
+                    }
+                    ByteArrayOutputStream output = new ByteArrayOutputStream();
+                    archive.extractFile(header, output);
+                    byte[] bytes = output.toByteArray();
+                    if (bytes.length > MAX_CUSTOM_ICON_BYTES) {
+                        throw new IOException("Icon file is too large");
+                    }
+                    totalBytes += bytes.length;
+                    if (totalBytes > MAX_ICON_PACK_BYTES) {
+                        throw new IOException("Icon pack is too large");
+                    }
+                    if ("manifest.json".equalsIgnoreCase(name) || name.endsWith("/manifest.json")) {
+                        manifestText = new String(bytes, StandardCharsets.UTF_8);
+                    } else if (isSupportedIconEntry(name)) {
+                        packedIcons.add(new PackedIconFile(name, bytes));
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Cannot read RAR icon pack", e);
+        }
+        return new ArchiveIconPackData(manifestText, packedIcons);
+    }
+
+    private String normalizeZipEntryName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String normalized = name.replace('\\', '/').trim();
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        if (normalized.contains("../") || normalized.equals("..")) {
+            return "";
+        }
+        return normalized;
+    }
+
+    private boolean isSupportedIconEntry(String name) {
+        String extension = extensionFromName(name);
+        return ".png".equals(extension) || ".webp".equals(extension)
+                || ".jpg".equals(extension) || ".jpeg".equals(extension);
+    }
+
+    private boolean isRarFileName(String name) {
+        return name != null && name.toLowerCase(Locale.ROOT).endsWith(".rar");
+    }
+
     private String readDisplayName(Uri uri) {
         try (Cursor cursor = appContext.getContentResolver().query(
                 uri,
@@ -737,6 +955,15 @@ public class CountRepository {
         return label.trim();
     }
 
+    private String labelFromEntryName(String name) {
+        if (name == null) {
+            return "";
+        }
+        int slash = name.lastIndexOf('/');
+        String label = slash >= 0 ? name.substring(slash + 1) : name;
+        return labelFromDisplayName(label);
+    }
+
     private void deleteFileQuietly(File file) {
         if (file != null && file.exists()) {
             file.delete();
@@ -750,6 +977,26 @@ public class CountRepository {
         ImportedIconFile(String fileName, String label) {
             this.fileName = fileName;
             this.label = label;
+        }
+    }
+
+    private static class PackedIconFile {
+        final String name;
+        final byte[] bytes;
+
+        PackedIconFile(String name, byte[] bytes) {
+            this.name = name;
+            this.bytes = bytes;
+        }
+    }
+
+    private static class ArchiveIconPackData {
+        final String manifestText;
+        final List<PackedIconFile> icons;
+
+        ArchiveIconPackData(String manifestText, List<PackedIconFile> icons) {
+            this.manifestText = manifestText;
+            this.icons = icons;
         }
     }
 

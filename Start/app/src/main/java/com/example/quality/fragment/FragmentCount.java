@@ -101,6 +101,7 @@ public class FragmentCount extends Fragment {
     private ActivityResultLauncher<Uri> cameraLauncher;
     private ActivityResultLauncher<String> imagePickerLauncher;
     private ActivityResultLauncher<String> customIconPickerLauncher;
+    private ActivityResultLauncher<String> customIconPackPickerLauncher;
     private String pendingImportSource;
     private String pendingExportType;
     private File pendingPhotoFile;
@@ -178,6 +179,10 @@ public class FragmentCount extends Fragment {
         customIconPickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.GetContent(),
                 this::handleCustomIconPicked
+        );
+        customIconPackPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                this::handleCustomIconPackPicked
         );
     }
 
@@ -1079,7 +1084,7 @@ public class FragmentCount extends Fragment {
                 } else if (itemIndex == customIcons.size() + 1) {
                     row.addView(inlineIconActionOption(
                             R.drawable.ic_compress,
-                            v -> Toast.makeText(requireContext(), "压缩包导入稍后支持", Toast.LENGTH_SHORT).show()
+                            v -> launchCustomIconPackPicker(customIconGrid, builtinIconGrid, selectedIcon, type)
                     ), params);
                 } else {
                     row.addView(new View(requireContext()), params);
@@ -1181,6 +1186,20 @@ public class FragmentCount extends Fragment {
         pendingReplacingCustomIconId = replaceId;
         pendingCustomIconType = type;
         customIconPickerLauncher.launch("image/*");
+    }
+
+    private void launchCustomIconPackPicker(
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            String type
+    ) {
+        pendingCustomIconGrid = customIconGrid;
+        pendingBuiltinIconGrid = builtinIconGrid;
+        pendingCustomIconSelection = selectedIcon;
+        pendingReplacingCustomIconId = null;
+        pendingCustomIconType = type;
+        customIconPackPickerLauncher.launch("*/*");
     }
 
     private void showDateStepDialog(EntryDraft draft, TextView dateButton) {
@@ -2064,6 +2083,34 @@ public class FragmentCount extends Fragment {
             Toast.makeText(requireContext(), pendingReplacingCustomIconId == null ? "图标已导入" : "图标已替换", Toast.LENGTH_SHORT).show();
         } catch (IOException e) {
             Toast.makeText(requireContext(), "无法导入图标，请选择 PNG/WebP/JPG 图片", Toast.LENGTH_SHORT).show();
+        } finally {
+            clearPendingCustomIconPicker();
+        }
+    }
+
+    private void handleCustomIconPackPicked(Uri uri) {
+        if (uri == null || pendingCustomIconGrid == null || pendingCustomIconSelection == null) {
+            clearPendingCustomIconPicker();
+            return;
+        }
+        try {
+            List<CountCustomIcon> imported = repository.importCustomIconPack(uri);
+            if (!imported.isEmpty()) {
+                pendingCustomIconSelection[0] = imported.get(0).iconRef();
+            }
+            if (pendingBuiltinIconGrid != null) {
+                renderInlineCategoryIconGrid(pendingBuiltinIconGrid, pendingCustomIconSelection);
+            }
+            renderInlineCustomIconGrid(
+                    pendingCustomIconGrid,
+                    pendingBuiltinIconGrid,
+                    pendingCustomIconSelection,
+                    pendingCustomIconType == null ? TYPE_EXPENSE : pendingCustomIconType
+            );
+            refreshMonthView();
+            Toast.makeText(requireContext(), "已导入 " + imported.size() + " 个图标", Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            Toast.makeText(requireContext(), "无法导入压缩包，请选择包含图标的 ZIP/RAR 文件", Toast.LENGTH_SHORT).show();
         } finally {
             clearPendingCustomIconPicker();
         }
