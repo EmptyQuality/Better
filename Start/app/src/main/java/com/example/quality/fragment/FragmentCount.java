@@ -1,12 +1,14 @@
 package com.example.quality.fragment;
 
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -24,6 +26,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.FileProvider;
 import androidx.fragment.app.Fragment;
 
 import com.example.quality.R;
@@ -83,8 +86,10 @@ public class FragmentCount extends Fragment {
     private LinearLayout transactionList;
     private ActivityResultLauncher<String[]> importFileLauncher;
     private ActivityResultLauncher<String> exportFileLauncher;
+    private ActivityResultLauncher<Uri> cameraLauncher;
     private String pendingImportSource;
     private String pendingExportType;
+    private File pendingPhotoFile;
 
     private static class CategorySelection {
         List<CountCategory> categories = new ArrayList<>();
@@ -99,6 +104,9 @@ public class FragmentCount extends Fragment {
         Double pendingAmount;
         String pendingOperator;
         LocalDate date = LocalDate.now();
+        String imagePath;
+        boolean deleteImageOnCancel;
+        boolean entrySaved;
     }
 
     @Override
@@ -119,6 +127,10 @@ public class FragmentCount extends Fragment {
         exportFileLauncher = registerForActivityResult(
                 new ActivityResultContracts.CreateDocument("text/csv"),
                 this::handleExportFile
+        );
+        cameraLauncher = registerForActivityResult(
+                new ActivityResultContracts.TakePicture(),
+                this::handlePhotoTaken
         );
     }
 
@@ -286,6 +298,17 @@ public class FragmentCount extends Fragment {
                 14, income ? COLOR_GREEN : COLOR_ORANGE, true);
         amount.setGravity(Gravity.END);
         row.addView(amount);
+
+        ImageView detailIcon = new ImageView(requireContext());
+        detailIcon.setImageResource(R.drawable.ic_detail);
+        detailIcon.setColorFilter(COLOR_MUTED);
+        detailIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        detailIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
+        detailIcon.setBackground(round(COLOR_BEE_SOFT, dp(12)));
+        detailIcon.setOnClickListener(v -> openTransactionDetail(tx.id));
+        LinearLayout.LayoutParams detailParams = fixed(dp(24), dp(24));
+        detailParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(detailIcon, detailParams);
         return row;
     }
 
@@ -351,10 +374,14 @@ public class FragmentCount extends Fragment {
     }
 
     private void showEntrySheet() {
-        showEntrySheet(null);
+        showEntrySheet(null, null);
     }
 
     private void showEntrySheet(@Nullable CountTransaction editingTx) {
+        showEntrySheet(editingTx, editingTx == null ? null : editingTx.imagePath);
+    }
+
+    private void showEntrySheet(@Nullable CountTransaction editingTx, @Nullable String imagePath) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
         EntryDraft draft = new EntryDraft();
         if (editingTx == null) {
@@ -365,6 +392,8 @@ public class FragmentCount extends Fragment {
             draft.amount = amountInputText(editingTx.amount);
             draft.date = editingTx.date;
         }
+        draft.imagePath = imagePath;
+        draft.deleteImageOnCancel = editingTx == null && imagePath != null && !imagePath.trim().isEmpty();
 
         LinearLayout sheet = vertical();
         sheet.setPadding(dp(18), dp(16), dp(18), dp(20));
@@ -426,6 +455,12 @@ public class FragmentCount extends Fragment {
         noteParams.setMargins(0, 0, 0, dp(2));
         sheet.addView(noteCard(noteInput), noteParams);
 
+        if (draft.imagePath != null && !draft.imagePath.trim().isEmpty()) {
+            LinearLayout.LayoutParams photoParams = matchWrap();
+            photoParams.setMargins(0, dp(10), 0, 0);
+            sheet.addView(photoPreviewCard(draft.imagePath), photoParams);
+        }
+
         Runnable refreshCategories = () -> {
             fillCategorySelection(draft.type, categorySelection);
             renderCategoryAmountRow(categoryRow, categorySelection);
@@ -449,6 +484,11 @@ public class FragmentCount extends Fragment {
 
         sheet.addView(buildKeypad(dialog, draft, amountDisplay, categorySelection, noteInput));
         dialog.setContentView(sheet);
+        dialog.setOnDismissListener(ignored -> {
+            if (draft.deleteImageOnCancel && !draft.entrySaved) {
+                deleteImageFile(draft.imagePath);
+            }
+        });
         dialog.show();
     }
 
@@ -617,7 +657,8 @@ public class FragmentCount extends Fragment {
                     amount,
                     category.id,
                     draft.date,
-                    noteInput.getText().toString().trim()
+                    noteInput.getText().toString().trim(),
+                    draft.imagePath
             );
         } else {
             repository.updateTransaction(
@@ -631,6 +672,7 @@ public class FragmentCount extends Fragment {
         }
         selectedMonth = draft.date.withDayOfMonth(1);
         refreshMonthView();
+        draft.entrySaved = true;
         dialog.dismiss();
     }
 
@@ -856,6 +898,14 @@ public class FragmentCount extends Fragment {
                     refreshMonthView();
                 })
                 .show();
+    }
+
+    private void openTransactionDetail(long transactionId) {
+        requireActivity().getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.container, FragmentCountTransactionDetail.newInstance(transactionId))
+                .addToBackStack("transaction_detail")
+                .commit();
     }
 
     private void openStatsFragment() {
@@ -1176,6 +1226,26 @@ public class FragmentCount extends Fragment {
         return card;
     }
 
+    private View photoPreviewCard(String imagePath) {
+        LinearLayout card = vertical();
+        card.setPadding(dp(14), dp(8), dp(14), dp(12));
+        card.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(16), COLOR_LINE, 1));
+        TextView label = text("图片", 12, COLOR_MUTED, false);
+        card.addView(label);
+        ImageView preview = new ImageView(requireContext());
+        preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        preview.setAdjustViewBounds(true);
+        preview.setImageURI(Uri.fromFile(new File(imagePath)));
+        preview.setBackground(round(0xFFFFFFFF, dp(12)));
+        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(118)
+        );
+        imageParams.setMargins(0, dp(8), 0, 0);
+        card.addView(preview, imageParams);
+        return card;
+    }
+
     private TextView typeChip(String label, boolean selected) {
         TextView chip = text(label, 14, COLOR_TEXT, true);
         chip.setGravity(Gravity.CENTER);
@@ -1224,6 +1294,10 @@ public class FragmentCount extends Fragment {
             dialog.dismiss();
             showEntrySheet();
         }));
+        sheet.addView(actionSheetItem(R.drawable.ic_camera, "拍照记录", "拍照后补充金额和类别", v -> {
+            dialog.dismiss();
+            startPhotoRecord();
+        }));
         sheet.addView(actionSheetItem(R.drawable.ic_stat, "图表统计", "查看趋势和排行榜", v -> {
             dialog.dismiss();
             openStatsFragment();
@@ -1243,6 +1317,67 @@ public class FragmentCount extends Fragment {
 
         dialog.setContentView(sheet);
         dialog.show();
+    }
+
+    private void startPhotoRecord() {
+        if (cameraLauncher == null) {
+            return;
+        }
+        try {
+            pendingPhotoFile = createPhotoFile();
+            Uri photoUri = FileProvider.getUriForFile(
+                    requireContext(),
+                    requireContext().getPackageName() + ".fileprovider",
+                    pendingPhotoFile
+            );
+            cameraLauncher.launch(photoUri);
+        } catch (ActivityNotFoundException e) {
+            clearPendingPhoto();
+            Toast.makeText(requireContext(), "未找到可用相机", Toast.LENGTH_SHORT).show();
+        } catch (IOException | IllegalArgumentException e) {
+            clearPendingPhoto();
+            Toast.makeText(requireContext(), "无法创建照片文件", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private File createPhotoFile() throws IOException {
+        File picturesDir = requireContext().getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        if (picturesDir == null) {
+            picturesDir = new File(requireContext().getFilesDir(), "Pictures");
+        }
+        if (!picturesDir.exists() && !picturesDir.mkdirs()) {
+            throw new IOException("Cannot create pictures directory");
+        }
+        return new File(picturesDir, "count_photo_" + System.currentTimeMillis() + ".jpg");
+    }
+
+    private void handlePhotoTaken(Boolean saved) {
+        File photoFile = pendingPhotoFile;
+        pendingPhotoFile = null;
+        if (!Boolean.TRUE.equals(saved) || photoFile == null || !photoFile.exists()) {
+            if (photoFile != null && photoFile.exists()) {
+                photoFile.delete();
+            }
+            return;
+        }
+        showEntrySheet(null, photoFile.getAbsolutePath());
+    }
+
+    private void clearPendingPhoto() {
+        if (pendingPhotoFile != null && pendingPhotoFile.exists()) {
+            pendingPhotoFile.delete();
+        }
+        pendingPhotoFile = null;
+    }
+
+    private void deleteImageFile(@Nullable String imagePath) {
+        if (imagePath == null || imagePath.trim().isEmpty()) {
+            return;
+        }
+        File imageFile = new File(imagePath);
+        if (imageFile.exists()) {
+            imageFile.delete();
+        }
     }
 
     private View actionSheetItem(String mark, String title, String subtitle, View.OnClickListener listener) {

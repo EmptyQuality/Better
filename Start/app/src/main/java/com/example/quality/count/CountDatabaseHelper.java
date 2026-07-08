@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper;
 
 public class CountDatabaseHelper extends SQLiteOpenHelper {
     public static final String DATABASE_NAME = "better_count.db";
-    private static final int DATABASE_VERSION = 2;
+    private static final int DATABASE_VERSION = 3;
 
     public static final String TABLE_CATEGORIES = "count_categories";
     public static final String TABLE_TRANSACTIONS = "count_transactions";
@@ -46,6 +46,7 @@ public class CountDatabaseHelper extends SQLiteOpenHelper {
                 "category_id INTEGER NOT NULL, " +
                 "happened_at INTEGER NOT NULL, " +
                 "note TEXT, " +
+                "image_path TEXT, " +
                 "created_at INTEGER NOT NULL, " +
                 "updated_at INTEGER NOT NULL, " +
                 "FOREIGN KEY(category_id) REFERENCES " + TABLE_CATEGORIES + "(id)" +

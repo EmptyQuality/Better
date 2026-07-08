@@ -12,6 +12,7 @@ public class CountTransaction {
     public final String categoryIcon;
     public final LocalDate date;
     public final String note;
+    public final String imagePath;
 
     public CountTransaction(
             long id,
@@ -24,6 +25,21 @@ public class CountTransaction {
             LocalDate date,
             String note
     ) {
+        this(id, type, amount, categoryId, categoryName, parentCategoryName, categoryIcon, date, note, null);
+    }
+
+    public CountTransaction(
+            long id,
+            String type,
+            double amount,
+            long categoryId,
+            String categoryName,
+            String parentCategoryName,
+            String categoryIcon,
+            LocalDate date,
+            String note,
+            String imagePath
+    ) {
         this.id = id;
         this.type = type;
         this.amount = amount;
@@ -33,6 +49,7 @@ public class CountTransaction {
         this.categoryIcon = categoryIcon;
         this.date = date;
         this.note = note;
+        this.imagePath = imagePath;
     }
 
     public String displayCategoryName() {

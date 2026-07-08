@@ -128,6 +128,10 @@ public class CountRepository {
     }
 
     public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note) {
+        return addTransaction(type, amount, categoryId, date, note, null);
+    }
+
+    public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note, String imagePath) {
         SQLiteDatabase db = helper.getWritableDatabase();
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
@@ -136,6 +140,7 @@ public class CountRepository {
         values.put("category_id", categoryId);
         values.put("happened_at", toMillis(date));
         values.put("note", note);
+        values.put("image_path", imagePath);
         values.put("created_at", now);
         values.put("updated_at", now);
         return db.insert(CountDatabaseHelper.TABLE_TRANSACTIONS, null, values);
@@ -225,7 +230,7 @@ public class CountRepository {
 
     public CountTransaction getLargestTransaction(String type, LocalDate start, LocalDate end) {
         SQLiteDatabase db = helper.getReadableDatabase();
-        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note, tx.image_path " +
                 "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
                 "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
                 "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
@@ -237,17 +242,22 @@ public class CountRepository {
                 String.valueOf(toMillis(end))
         })) {
             if (cursor.moveToFirst()) {
-                return new CountTransaction(
-                        cursor.getLong(0),
-                        cursor.getString(1),
-                        cursor.getDouble(2),
-                        cursor.getLong(3),
-                        cursor.getString(4),
-                        cursor.getString(5),
-                        cursor.getString(6),
-                        fromMillis(cursor.getLong(7)),
-                        cursor.getString(8)
-                );
+                return readTransaction(cursor);
+            }
+        }
+        return null;
+    }
+
+    public CountTransaction getTransaction(long id) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note, tx.image_path " +
+                "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
+                "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
+                "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
+                "WHERE tx.id = ? LIMIT 1";
+        try (Cursor cursor = db.rawQuery(sql, new String[]{String.valueOf(id)})) {
+            if (cursor.moveToFirst()) {
+                return readTransaction(cursor);
             }
         }
         return null;
@@ -280,7 +290,7 @@ public class CountRepository {
     public List<CountTransaction> getTransactions(LocalDate start, LocalDate end) {
         SQLiteDatabase db = helper.getReadableDatabase();
         List<CountTransaction> transactions = new ArrayList<>();
-        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note, tx.image_path " +
                 "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
                 "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
                 "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
@@ -291,17 +301,7 @@ public class CountRepository {
                 String.valueOf(toMillis(end))
         })) {
             while (cursor.moveToNext()) {
-                transactions.add(new CountTransaction(
-                        cursor.getLong(0),
-                        cursor.getString(1),
-                        cursor.getDouble(2),
-                        cursor.getLong(3),
-                        cursor.getString(4),
-                        cursor.getString(5),
-                        cursor.getString(6),
-                        fromMillis(cursor.getLong(7)),
-                        cursor.getString(8)
-                ));
+                transactions.add(readTransaction(cursor));
             }
         }
         return transactions;
@@ -310,24 +310,14 @@ public class CountRepository {
     public List<CountTransaction> getAllTransactions() {
         SQLiteDatabase db = helper.getReadableDatabase();
         List<CountTransaction> transactions = new ArrayList<>();
-        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note, tx.image_path " +
                 "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
                 "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
                 "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
                 "ORDER BY tx.happened_at DESC, tx.created_at DESC, tx.id DESC";
         try (Cursor cursor = db.rawQuery(sql, null)) {
             while (cursor.moveToNext()) {
-                transactions.add(new CountTransaction(
-                        cursor.getLong(0),
-                        cursor.getString(1),
-                        cursor.getDouble(2),
-                        cursor.getLong(3),
-                        cursor.getString(4),
-                        cursor.getString(5),
-                        cursor.getString(6),
-                        fromMillis(cursor.getLong(7)),
-                        cursor.getString(8)
-                ));
+                transactions.add(readTransaction(cursor));
             }
         }
         return transactions;
@@ -380,6 +370,21 @@ public class CountRepository {
                 cursor.getString(3),
                 parentId,
                 cursor.getInt(5)
+        );
+    }
+
+    private CountTransaction readTransaction(Cursor cursor) {
+        return new CountTransaction(
+                cursor.getLong(0),
+                cursor.getString(1),
+                cursor.getDouble(2),
+                cursor.getLong(3),
+                cursor.getString(4),
+                cursor.getString(5),
+                cursor.getString(6),
+                fromMillis(cursor.getLong(7)),
+                cursor.getString(8),
+                cursor.getString(9)
         );
     }
 
