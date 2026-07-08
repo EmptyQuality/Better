@@ -408,7 +408,7 @@ public class CountImportService {
                 continue;
             }
             result.totalRows++;
-            CountImportRecord record = parseRecord(row, columns, i + 1, result);
+            CountImportRecord record = parseRecord(row, columns, i + 1, result, source);
             if (record != null) {
                 records.add(record);
             }
@@ -420,7 +420,8 @@ public class CountImportService {
             List<String> row,
             Columns columns,
             int rowNumber,
-            CountImportResult result
+            CountImportResult result,
+            String source
     ) {
         LocalDate date = parseDate(cell(row, columns.date));
         if (date == null) {
@@ -458,7 +459,7 @@ public class CountImportService {
         }
 
         String category = cell(row, columns.category).trim();
-        String note = buildImportNote(row, columns);
+        String note = buildImportNote(row, columns, category, source);
         return new CountImportRecord(type, amount, category, date, note);
     }
 
@@ -540,11 +541,14 @@ public class CountImportService {
         return columns;
     }
 
-    private static String buildImportNote(List<String> row, Columns columns) {
+    private static String buildImportNote(List<String> row, Columns columns, String category, String source) {
+        if (SOURCE_SHARK.equals(source)) {
+            String note = cell(row, columns.note).trim();
+            return note.isEmpty() ? valueOrEmpty(category).trim() : note;
+        }
         StringBuilder builder = new StringBuilder();
         appendNotePart(builder, "交易对方", cell(row, columns.counterparty));
         appendNotePart(builder, "商品", cell(row, columns.product));
-        appendNotePart(builder, "账户", cell(row, columns.account));
         appendNotePart(builder, "备注", cell(row, columns.note));
         return builder.toString();
     }

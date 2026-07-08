@@ -25,6 +25,7 @@ import com.example.quality.count.CountLineChartView;
 import com.example.quality.count.CountRepository;
 import com.example.quality.count.CountSeriesPoint;
 import com.example.quality.count.CountStats;
+import com.example.quality.count.CountTransaction;
 import com.example.quality.util.LogUtil;
 
 import java.time.DayOfWeek;
@@ -158,14 +159,14 @@ public class FragmentCountStats extends Fragment {
 
         LinearLayout overviewCard = horizontal();
         overviewCard.setGravity(Gravity.CENTER);
-        overviewCard.setPadding(dp(16), dp(14), dp(16), dp(14));
+        overviewCard.setPadding(dp(16), dp(10), dp(16), dp(10));
         overviewCard.setBackground(round(COLOR_SURFACE, dp(20)));
         overviewCard.setElevation(dp(2));
         totalValue = metricText("总支出", "0.00");
         averageValue = metricText("平均值", "0.00");
-        overviewCard.addView(totalValue, new LinearLayout.LayoutParams(0, dp(54), 1));
+        overviewCard.addView(totalValue, new LinearLayout.LayoutParams(0, dp(44), 1));
         overviewCard.addView(metricDivider());
-        overviewCard.addView(averageValue, new LinearLayout.LayoutParams(0, dp(54), 1));
+        overviewCard.addView(averageValue, new LinearLayout.LayoutParams(0, dp(44), 1));
         content.addView(overviewCard, cardParams(0, 0, 0, dp(12)));
 
         LinearLayout chartCard = vertical();
@@ -317,11 +318,18 @@ public class FragmentCountStats extends Fragment {
         java.util.ArrayList<CountSeriesPoint> points = new java.util.ArrayList<>();
         LocalDate day = start;
         while (day.isBefore(end)) {
-            CountStats stats = repository.getStats(day, day.plusDays(1));
+            LocalDate nextDay = day.plusDays(1);
+            CountStats stats = repository.getStats(day, nextDay);
             double value = TYPE_INCOME.equals(type) ? stats.income : stats.expense;
+            CountTransaction largest = repository.getLargestTransaction(type, day, nextDay);
             points.add(new CountSeriesPoint(String.format(Locale.CHINA, "%02d-%02d",
-                    day.getMonthValue(), day.getDayOfMonth()), value));
-            day = day.plusDays(1);
+                    day.getMonthValue(), day.getDayOfMonth()), value,
+                    TYPE_INCOME.equals(type) ? "当日总收入" : "当日总支出",
+                    TYPE_INCOME.equals(type) ? "最大收入" : "最大花销",
+                    largest == null ? "" : largest.displayCategoryName(),
+                    largest == null ? 0 : largest.amount,
+                    largest != null));
+            day = nextDay;
         }
         return points;
     }
@@ -330,9 +338,16 @@ public class FragmentCountStats extends Fragment {
         java.util.ArrayList<CountSeriesPoint> points = new java.util.ArrayList<>();
         for (int month = 1; month <= 12; month++) {
             LocalDate start = LocalDate.of(year, month, 1);
-            CountStats stats = repository.getStats(start, start.plusMonths(1));
+            LocalDate end = start.plusMonths(1);
+            CountStats stats = repository.getStats(start, end);
             double value = TYPE_INCOME.equals(type) ? stats.income : stats.expense;
-            points.add(new CountSeriesPoint(String.format(Locale.CHINA, "%02d月", month), value));
+            CountTransaction largest = repository.getLargestTransaction(type, start, end);
+            points.add(new CountSeriesPoint(String.format(Locale.CHINA, "%02d月", month), value,
+                    TYPE_INCOME.equals(type) ? "当月总收入" : "当月总支出",
+                    TYPE_INCOME.equals(type) ? "最大收入" : "最大花销",
+                    largest == null ? "" : largest.displayCategoryName(),
+                    largest == null ? 0 : largest.amount,
+                    largest != null));
         }
         return points;
     }
@@ -407,8 +422,8 @@ public class FragmentCountStats extends Fragment {
     private View metricDivider() {
         View divider = new View(requireContext());
         divider.setBackgroundColor(0x1F8D6E63);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(1), dp(34));
-        params.setMargins(dp(8), dp(10), dp(8), 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(1), dp(28));
+        params.setMargins(dp(8), dp(8), dp(8), 0);
         divider.setLayoutParams(params);
         return divider;
     }

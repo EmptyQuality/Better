@@ -12,6 +12,8 @@ public final class CategoryIconMapper {
     public static final String DEFAULT_INCOME_ICON = "income";
 
     public static final String[] ICON_KEYS = {
+            "expend",
+            "income",
             "food",
             "car",
             "goods",

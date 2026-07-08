@@ -23,6 +23,8 @@ import androidx.fragment.app.Fragment;
 import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CountCategory;
 import com.example.quality.count.CountRepository;
+import com.example.quality.R;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 
 import java.util.List;
 
@@ -40,12 +42,9 @@ public class FragmentCategoryManage extends Fragment {
 
     private CountRepository repository;
     private String currentType = TYPE_EXPENSE;
-    private String selectedIcon = "food";
     private TextView expenseTab;
     private TextView incomeTab;
     private LinearLayout categoryList;
-    private LinearLayout iconGrid;
-    private EditText nameInput;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -102,45 +101,6 @@ public class FragmentCategoryManage extends Fragment {
         listParams.setMargins(0, dp(10), 0, dp(18));
         content.addView(categoryList, listParams);
 
-        LinearLayout addCard = vertical();
-        addCard.setPadding(dp(16), dp(14), dp(16), dp(16));
-        addCard.setBackground(round(COLOR_SURFACE, dp(20)));
-        addCard.setElevation(dp(2));
-
-        TextView addTitle = text("新增类别", 16, COLOR_TEXT, true);
-        addCard.addView(addTitle);
-
-        nameInput = new EditText(requireContext());
-        nameInput.setHint("输入类别名称");
-        nameInput.setSingleLine(true);
-        nameInput.setTextColor(COLOR_TEXT);
-        nameInput.setHintTextColor(0xFF9CA3AF);
-        nameInput.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
-        nameInput.setPadding(dp(14), 0, dp(14), 0);
-        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(50)
-        );
-        inputParams.setMargins(0, dp(10), 0, dp(16));
-        addCard.addView(nameInput, inputParams);
-
-        TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
-        addCard.addView(iconTitle);
-        iconGrid = vertical();
-        LinearLayout.LayoutParams gridParams = matchWrap();
-        gridParams.setMargins(0, dp(10), 0, dp(18));
-        addCard.addView(iconGrid, gridParams);
-
-        TextView save = text("保存类别", 16, COLOR_TEXT, true);
-        save.setGravity(Gravity.CENTER);
-        save.setBackground(round(COLOR_BEE, dp(16)));
-        save.setOnClickListener(v -> saveCategory());
-        addCard.addView(save, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(50)
-        ));
-        content.addView(addCard, matchWrap());
-
         return page;
     }
 
@@ -169,20 +129,18 @@ public class FragmentCategoryManage extends Fragment {
         tab.setGravity(Gravity.CENTER);
         tab.setOnClickListener(v -> {
             currentType = type;
-            selectedIcon = CategoryIconMapper.defaultIcon(currentType);
             refreshPage();
         });
         return tab;
     }
 
     private void refreshPage() {
-        if (categoryList == null || iconGrid == null) {
+        if (categoryList == null) {
             return;
         }
         styleTab(expenseTab, TYPE_EXPENSE.equals(currentType));
         styleTab(incomeTab, TYPE_INCOME.equals(currentType));
         renderCategories();
-        renderIconGrid();
     }
 
     private void styleTab(TextView tab, boolean selected) {
@@ -198,13 +156,13 @@ public class FragmentCategoryManage extends Fragment {
             empty.setGravity(Gravity.CENTER);
             empty.setPadding(0, dp(24), 0, dp(24));
             categoryList.addView(empty);
-            return;
         }
         addCategoryRows(categories);
     }
 
     private void addCategoryRows(List<CountCategory> categories) {
-        for (int index = 0; index < categories.size(); index += 4) {
+        int totalItems = categories.size() + 1;
+        for (int index = 0; index < totalItems; index += 4) {
             LinearLayout row = horizontal();
             row.setGravity(Gravity.CENTER);
             for (int column = 0; column < 4; column++) {
@@ -213,6 +171,8 @@ public class FragmentCategoryManage extends Fragment {
                 params.setMargins(dp(4), dp(4), dp(4), dp(4));
                 if (itemIndex < categories.size()) {
                     row.addView(categoryCell(categories.get(itemIndex)), params);
+                } else if (itemIndex == categories.size()) {
+                    row.addView(addCategoryCell(), params);
                 } else {
                     SpaceView space = new SpaceView(requireContext());
                     row.addView(space, params);
@@ -227,6 +187,10 @@ public class FragmentCategoryManage extends Fragment {
         cell.setGravity(Gravity.CENTER);
         cell.setBackground(roundStroke(COLOR_SURFACE, dp(16), COLOR_LINE, 1));
         cell.setElevation(dp(1));
+        cell.setOnLongClickListener(v -> {
+            showCategoryEditor(category);
+            return true;
+        });
         cell.addView(iconView(category.icon, 24), fixed(dp(42), dp(42)));
         TextView name = text(category.name, 12, COLOR_TEXT, false);
         name.setGravity(Gravity.CENTER);
@@ -239,7 +203,88 @@ public class FragmentCategoryManage extends Fragment {
         return cell;
     }
 
-    private void renderIconGrid() {
+    private View addCategoryCell() {
+        LinearLayout cell = vertical();
+        cell.setGravity(Gravity.CENTER);
+        cell.setBackground(roundStroke(COLOR_SURFACE, dp(16), COLOR_LINE, 1));
+        cell.setOnClickListener(v -> showCategoryEditor(null));
+
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(R.drawable.ic_add);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        icon.setBackground(round(COLOR_BEE_SOFT, dp(24)));
+        icon.setPadding(dp(9), dp(9), dp(9), dp(9));
+        cell.addView(icon, fixed(dp(42), dp(42)));
+
+        TextView name = text("添加", 12, COLOR_MUTED, false);
+        name.setGravity(Gravity.CENTER);
+        name.setPadding(dp(3), dp(6), dp(3), 0);
+        cell.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        return cell;
+    }
+
+    private void showCategoryEditor(@Nullable CountCategory editingCategory) {
+        BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
+        LinearLayout sheet = vertical();
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(22));
+        sheet.setBackgroundColor(COLOR_SURFACE);
+
+        boolean editing = editingCategory != null;
+        TextView title = text(editing ? "编辑类别" : "新增类别", 18, COLOR_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        sheet.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(32)
+        ));
+
+        EditText nameInput = new EditText(requireContext());
+        nameInput.setHint("输入类别名称");
+        nameInput.setSingleLine(true);
+        nameInput.setTextColor(COLOR_TEXT);
+        nameInput.setHintTextColor(0xFF9CA3AF);
+        nameInput.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
+        nameInput.setPadding(dp(14), 0, dp(14), 0);
+        if (editing) {
+            nameInput.setText(editingCategory.name);
+            nameInput.setSelection(nameInput.getText().length());
+        }
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(50)
+        );
+        inputParams.setMargins(0, dp(14), 0, dp(14));
+        sheet.addView(nameInput, inputParams);
+
+        TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
+        sheet.addView(iconTitle);
+
+        LinearLayout iconGrid = vertical();
+        String[] selectedIcon = {
+                editing ? CategoryIconMapper.normalize(editingCategory.icon) : CategoryIconMapper.defaultIcon(currentType)
+        };
+        LinearLayout.LayoutParams gridParams = matchWrap();
+        gridParams.setMargins(0, dp(10), 0, dp(18));
+        sheet.addView(iconGrid, gridParams);
+        renderIconGrid(iconGrid, selectedIcon);
+
+        TextView save = text(editing ? "保存修改" : "保存类别", 16, COLOR_TEXT, true);
+        save.setGravity(Gravity.CENTER);
+        save.setBackground(round(COLOR_BEE, dp(16)));
+        save.setOnClickListener(v -> saveCategory(dialog, editingCategory, nameInput, selectedIcon[0]));
+        sheet.addView(save, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(50)
+        ));
+
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    private void renderIconGrid(LinearLayout iconGrid, String[] selectedIcon) {
         iconGrid.removeAllViews();
         String[] keys = CategoryIconMapper.ICON_KEYS;
         for (int index = 0; index < keys.length; index += 5) {
@@ -250,7 +295,7 @@ public class FragmentCategoryManage extends Fragment {
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(56), 1);
                 params.setMargins(dp(4), dp(4), dp(4), dp(4));
                 if (itemIndex < keys.length) {
-                    row.addView(iconOption(keys[itemIndex]), params);
+                    row.addView(iconOption(keys[itemIndex], iconGrid, selectedIcon), params);
                 } else {
                     row.addView(new SpaceView(requireContext()), params);
                 }
@@ -259,9 +304,9 @@ public class FragmentCategoryManage extends Fragment {
         }
     }
 
-    private View iconOption(String iconKey) {
+    private View iconOption(String iconKey, LinearLayout iconGrid, String[] selectedIcon) {
         FrameLayout box = new FrameLayout(requireContext());
-        boolean selected = iconKey.equals(selectedIcon);
+        boolean selected = iconKey.equals(selectedIcon[0]);
         box.setBackground(roundStroke(
                 selected ? COLOR_BEE_SOFT : COLOR_SURFACE_SOFT,
                 dp(14),
@@ -275,8 +320,8 @@ public class FragmentCategoryManage extends Fragment {
         FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER);
         box.addView(icon, iconParams);
         box.setOnClickListener(v -> {
-            selectedIcon = iconKey;
-            renderIconGrid();
+            selectedIcon[0] = iconKey;
+            renderIconGrid(iconGrid, selectedIcon);
         });
         return box;
     }
@@ -293,15 +338,25 @@ public class FragmentCategoryManage extends Fragment {
         return image;
     }
 
-    private void saveCategory() {
+    private void saveCategory(
+            BottomSheetDialog dialog,
+            @Nullable CountCategory editingCategory,
+            EditText nameInput,
+            String iconKey
+    ) {
         String name = nameInput.getText().toString().trim();
         if (name.isEmpty()) {
             Toast.makeText(requireContext(), "请输入类别名称", Toast.LENGTH_SHORT).show();
             return;
         }
-        repository.addCategory(name, currentType, selectedIcon);
-        nameInput.setText("");
-        Toast.makeText(requireContext(), "类别已保存", Toast.LENGTH_SHORT).show();
+        if (editingCategory == null) {
+            repository.addCategory(name, currentType, iconKey);
+            Toast.makeText(requireContext(), "类别已保存", Toast.LENGTH_SHORT).show();
+        } else {
+            repository.updateCategory(editingCategory.id, name, iconKey);
+            Toast.makeText(requireContext(), "类别已更新", Toast.LENGTH_SHORT).show();
+        }
+        dialog.dismiss();
         refreshPage();
     }
 

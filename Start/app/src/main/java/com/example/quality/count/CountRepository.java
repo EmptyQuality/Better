@@ -113,6 +113,20 @@ public class CountRepository {
         );
     }
 
+    public void updateCategory(long id, String newName, String iconKey) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        ContentValues values = new ContentValues();
+        values.put("name", newName);
+        values.put("icon", CategoryIconMapper.normalize(iconKey));
+        values.put("updated_at", System.currentTimeMillis());
+        db.update(
+                CountDatabaseHelper.TABLE_CATEGORIES,
+                values,
+                "id = ?",
+                new String[]{String.valueOf(id)}
+        );
+    }
+
     public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note) {
         SQLiteDatabase db = helper.getWritableDatabase();
         long now = System.currentTimeMillis();
@@ -209,6 +223,36 @@ public class CountRepository {
         return new CountStats(0, 0);
     }
 
+    public CountTransaction getLargestTransaction(String type, LocalDate start, LocalDate end) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+                "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
+                "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
+                "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
+                "WHERE tx.type = ? AND tx.happened_at >= ? AND tx.happened_at < ? " +
+                "ORDER BY tx.amount DESC, tx.created_at DESC, tx.id DESC LIMIT 1";
+        try (Cursor cursor = db.rawQuery(sql, new String[]{
+                type,
+                String.valueOf(toMillis(start)),
+                String.valueOf(toMillis(end))
+        })) {
+            if (cursor.moveToFirst()) {
+                return new CountTransaction(
+                        cursor.getLong(0),
+                        cursor.getString(1),
+                        cursor.getDouble(2),
+                        cursor.getLong(3),
+                        cursor.getString(4),
+                        cursor.getString(5),
+                        cursor.getString(6),
+                        fromMillis(cursor.getLong(7)),
+                        cursor.getString(8)
+                );
+            }
+        }
+        return null;
+    }
+
     public List<CategoryTotal> getCategoryTotals(String type, LocalDate start, LocalDate end) {
         SQLiteDatabase db = helper.getReadableDatabase();
         List<CategoryTotal> totals = new ArrayList<>();
@@ -241,7 +285,7 @@ public class CountRepository {
                 "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
                 "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
                 "WHERE tx.happened_at >= ? AND tx.happened_at < ? " +
-                "ORDER BY tx.created_at DESC, tx.id DESC";
+                "ORDER BY tx.happened_at DESC, tx.created_at DESC, tx.id DESC";
         try (Cursor cursor = db.rawQuery(sql, new String[]{
                 String.valueOf(toMillis(start)),
                 String.valueOf(toMillis(end))

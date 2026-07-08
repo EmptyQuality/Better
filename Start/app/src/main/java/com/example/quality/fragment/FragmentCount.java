@@ -96,6 +96,8 @@ public class FragmentCount extends Fragment {
         Long editingId;
         String type = TYPE_EXPENSE;
         String amount = "";
+        Double pendingAmount;
+        String pendingOperator;
         LocalDate date = LocalDate.now();
     }
 
@@ -256,8 +258,9 @@ public class FragmentCount extends Fragment {
         row.setPadding(dp(12), dp(12), dp(12), dp(12));
         row.setBackground(round(COLOR_SURFACE, dp(18)));
         row.setElevation(dp(2));
+        row.setOnClickListener(v -> showEntrySheet(tx));
         row.setOnLongClickListener(v -> {
-            showTransactionActions(tx);
+            confirmDeleteTransaction(tx);
             return true;
         });
 
@@ -328,10 +331,18 @@ public class FragmentCount extends Fragment {
     }
 
     private View compactMonthPickerColumn(NumberPicker picker) {
+        return compactPickerColumn(picker, 104);
+    }
+
+    private View compactDatePickerColumn(NumberPicker picker) {
+        return compactPickerColumn(picker, 82);
+    }
+
+    private View compactPickerColumn(NumberPicker picker, int widthDp) {
         FrameLayout column = new FrameLayout(requireContext());
         column.setPadding(dp(12), 0, dp(12), 0);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                dp(104),
+                dp(widthDp),
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER
         );
@@ -436,8 +447,7 @@ public class FragmentCount extends Fragment {
             updateAmountDisplay(amountDisplay, draft);
         });
 
-        sheet.addView(buildKeypad(dialog, draft, amountDisplay,
-                categorySelection, noteInput, expenseButton, incomeButton, refreshCategories));
+        sheet.addView(buildKeypad(dialog, draft, amountDisplay, categorySelection, noteInput));
         dialog.setContentView(sheet);
         dialog.show();
     }
@@ -447,10 +457,7 @@ public class FragmentCount extends Fragment {
             EntryDraft draft,
             TextView amountDisplay,
             CategorySelection categorySelection,
-            EditText noteInput,
-            TextView expenseButton,
-            TextView incomeButton,
-            Runnable refreshCategories
+            EditText noteInput
     ) {
         LinearLayout pad = horizontal();
         pad.setPadding(0, dp(14), 0, 0);
@@ -483,21 +490,11 @@ public class FragmentCount extends Fragment {
 
         LinearLayout actions = vertical();
         TextView plus = keypadButton("+", 20, false);
-        plus.setOnClickListener(v -> {
-            draft.type = TYPE_INCOME;
-            updateTypeChips(expenseButton, incomeButton, true);
-            refreshCategories.run();
-            updateAmountDisplay(amountDisplay, draft);
-        });
+        plus.setOnClickListener(v -> handleOperatorKey(draft, "+", amountDisplay));
         actions.addView(plus, fixed(dp(66), dp(54)));
 
         TextView minus = keypadButton("-", 20, false);
-        minus.setOnClickListener(v -> {
-            draft.type = TYPE_EXPENSE;
-            updateTypeChips(expenseButton, incomeButton, false);
-            refreshCategories.run();
-            updateAmountDisplay(amountDisplay, draft);
-        });
+        minus.setOnClickListener(v -> handleOperatorKey(draft, "-", amountDisplay));
         actions.addView(minus, fixed(dp(66), dp(54)));
 
         TextView done = keypadButton("完成", 15, true);
@@ -534,9 +531,47 @@ public class FragmentCount extends Fragment {
         updateAmountDisplay(amountDisplay, draft);
     }
 
+    private void handleOperatorKey(EntryDraft draft, String operator, TextView amountDisplay) {
+        double current = parseDraftAmount(draft.amount);
+        if (draft.pendingOperator != null && draft.pendingAmount != null && !draft.amount.isEmpty()) {
+            current = calculateAmount(draft.pendingAmount, current, draft.pendingOperator);
+        }
+        draft.pendingAmount = current;
+        draft.pendingOperator = operator;
+        draft.amount = "";
+        updateAmountDisplay(amountDisplay, draft);
+    }
+
     private void updateAmountDisplay(TextView amountDisplay, EntryDraft draft) {
-        amountDisplay.setText("¥ " + (draft.amount.isEmpty() ? "0.00" : draft.amount));
+        String text = draft.amount.isEmpty() ? "0.00" : draft.amount;
+        if (draft.pendingOperator != null && draft.pendingAmount != null) {
+            text = amountInputText(draft.pendingAmount) + " " + draft.pendingOperator + " " + text;
+        }
+        amountDisplay.setText("¥ " + text);
         amountDisplay.setTextColor(TYPE_INCOME.equals(draft.type) ? COLOR_GREEN : COLOR_ORANGE);
+    }
+
+    private double finalDraftAmount(EntryDraft draft) {
+        double current = parseDraftAmount(draft.amount);
+        if (draft.pendingOperator == null || draft.pendingAmount == null) {
+            return current;
+        }
+        return calculateAmount(draft.pendingAmount, current, draft.pendingOperator);
+    }
+
+    private double calculateAmount(double left, double right, String operator) {
+        return "-".equals(operator) ? left - right : left + right;
+    }
+
+    private double parseDraftAmount(String value) {
+        if (value == null || value.isEmpty() || ".".equals(value)) {
+            return 0;
+        }
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private String amountInputText(double amount) {
@@ -558,7 +593,7 @@ public class FragmentCount extends Fragment {
     ) {
         double amount;
         try {
-            amount = Double.parseDouble(draft.amount);
+            amount = finalDraftAmount(draft);
         } catch (NumberFormatException e) {
             Toast.makeText(requireContext(), "请输入金额", Toast.LENGTH_SHORT).show();
             return;
@@ -775,9 +810,9 @@ public class FragmentCount extends Fragment {
         yearPicker.setOnValueChangedListener(rangeListener);
         monthPicker.setOnValueChangedListener(rangeListener);
 
-        content.addView(yearPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
-        content.addView(monthPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
-        content.addView(dayPicker, new LinearLayout.LayoutParams(0, dp(156), 1));
+        content.addView(compactDatePickerColumn(yearPicker), new LinearLayout.LayoutParams(0, dp(156), 1));
+        content.addView(compactDatePickerColumn(monthPicker), new LinearLayout.LayoutParams(0, dp(156), 1));
+        content.addView(compactDatePickerColumn(dayPicker), new LinearLayout.LayoutParams(0, dp(156), 1));
 
         new AlertDialog.Builder(requireContext())
                 .setTitle("选择日期")
@@ -809,18 +844,6 @@ public class FragmentCount extends Fragment {
             dayPicker.setValue(maxDay);
         }
         dayPicker.setMaxValue(maxDay);
-    }
-
-    private void showTransactionActions(CountTransaction tx) {
-        new AlertDialog.Builder(requireContext())
-                .setItems(new String[]{"修改", "删除"}, (dialog, which) -> {
-                    if (which == 0) {
-                        showEntrySheet(tx);
-                    } else {
-                        confirmDeleteTransaction(tx);
-                    }
-                })
-                .show();
     }
 
     private void confirmDeleteTransaction(CountTransaction tx) {
