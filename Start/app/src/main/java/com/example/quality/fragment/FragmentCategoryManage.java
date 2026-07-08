@@ -575,6 +575,8 @@ public class FragmentCategoryManage extends Fragment {
             Toast.makeText(requireContext(), "已导入 " + imported.size() + " 个图标", Toast.LENGTH_SHORT).show();
         } catch (IOException e) {
             Toast.makeText(requireContext(), "无法导入压缩包，请选择包含图标的 ZIP/RAR 文件", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(requireContext(), "无法导入压缩包，文件格式可能不受支持", Toast.LENGTH_SHORT).show();
         } finally {
             clearPendingCustomIconPicker();
         }

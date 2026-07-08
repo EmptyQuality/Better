@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -814,7 +815,7 @@ public class CountRepository {
             if (input == null) {
                 throw new IOException("Cannot open selected icon pack");
             }
-            ZipInputStream zip = new ZipInputStream(input);
+            ZipInputStream zip = new ZipInputStream(input, Charset.forName("GBK"));
             ZipEntry entry;
             long totalBytes = 0;
             while ((entry = zip.getNextEntry()) != null) {
