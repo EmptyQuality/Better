@@ -1,6 +1,9 @@
 package com.example.quality.count;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class CountTransaction {
     public final long id;
@@ -13,6 +16,7 @@ public class CountTransaction {
     public final LocalDate date;
     public final String note;
     public final String imagePath;
+    public final List<String> imagePaths;
 
     public CountTransaction(
             long id,
@@ -25,7 +29,7 @@ public class CountTransaction {
             LocalDate date,
             String note
     ) {
-        this(id, type, amount, categoryId, categoryName, parentCategoryName, categoryIcon, date, note, null);
+        this(id, type, amount, categoryId, categoryName, parentCategoryName, categoryIcon, date, note, (String) null);
     }
 
     public CountTransaction(
@@ -40,6 +44,24 @@ public class CountTransaction {
             String note,
             String imagePath
     ) {
+        this(id, type, amount, categoryId, categoryName, parentCategoryName, categoryIcon, date, note,
+                imagePath == null || imagePath.trim().isEmpty()
+                        ? Collections.emptyList()
+                        : Collections.singletonList(imagePath));
+    }
+
+    public CountTransaction(
+            long id,
+            String type,
+            double amount,
+            long categoryId,
+            String categoryName,
+            String parentCategoryName,
+            String categoryIcon,
+            LocalDate date,
+            String note,
+            List<String> imagePaths
+    ) {
         this.id = id;
         this.type = type;
         this.amount = amount;
@@ -49,7 +71,16 @@ public class CountTransaction {
         this.categoryIcon = categoryIcon;
         this.date = date;
         this.note = note;
-        this.imagePath = imagePath;
+        List<String> paths = new ArrayList<>();
+        if (imagePaths != null) {
+            for (String path : imagePaths) {
+                if (path != null && !path.trim().isEmpty()) {
+                    paths.add(path);
+                }
+            }
+        }
+        this.imagePaths = Collections.unmodifiableList(paths);
+        this.imagePath = paths.isEmpty() ? null : paths.get(0);
     }
 
     public String displayCategoryName() {

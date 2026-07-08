@@ -14,6 +14,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -24,6 +25,7 @@ import com.example.quality.count.CountTransaction;
 
 import java.io.File;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 
 public class FragmentCountTransactionDetail extends Fragment {
@@ -129,7 +131,7 @@ public class FragmentCountTransactionDetail extends Fragment {
         imageCard.setElevation(dp(2));
         TextView imageTitle = text("图片", 16, COLOR_TEXT, true);
         imageCard.addView(imageTitle);
-        View imageContent = buildImageContent(tx.imagePath);
+        View imageContent = buildImageContent(tx.imagePaths);
         LinearLayout.LayoutParams imageContentParams = matchWrap();
         imageContentParams.setMargins(0, dp(12), 0, 0);
         imageCard.addView(imageContent, imageContentParams);
@@ -169,35 +171,70 @@ public class FragmentCountTransactionDetail extends Fragment {
         return row;
     }
 
-    private View buildImageContent(@Nullable String imagePath) {
-        if (imagePath == null || imagePath.trim().isEmpty()) {
+    private View buildImageContent(List<String> imagePaths) {
+        if (imagePaths == null || imagePaths.isEmpty()) {
             TextView empty = text("无图片", 14, COLOR_MUTED, false);
             empty.setGravity(Gravity.CENTER);
             empty.setBackground(round(COLOR_SURFACE_SOFT, dp(16)));
             empty.setPadding(0, dp(26), 0, dp(26));
             return empty;
         }
-        File imageFile = new File(imagePath);
-        if (!imageFile.exists()) {
+        LinearLayout images = vertical();
+        boolean hasImage = false;
+        for (String imagePath : imagePaths) {
+            if (imagePath == null || imagePath.trim().isEmpty()) {
+                continue;
+            }
+            File imageFile = new File(imagePath);
+            if (!imageFile.exists()) {
+                continue;
+            }
+            hasImage = true;
+            ImageView image = new ImageView(requireContext());
+            image.setImageURI(Uri.fromFile(imageFile));
+            image.setAdjustViewBounds(true);
+            image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            image.setBackground(round(COLOR_SURFACE_SOFT, dp(16)));
+            image.setMinimumHeight(dp(180));
+            image.setOnClickListener(v -> showImageViewer(imagePath));
+            LinearLayout.LayoutParams params = matchWrap();
+            params.setMargins(0, 0, 0, dp(12));
+            images.addView(image, params);
+        }
+        if (!hasImage) {
             TextView missing = text("图片文件不存在", 14, COLOR_MUTED, false);
             missing.setGravity(Gravity.CENTER);
             missing.setBackground(round(COLOR_SURFACE_SOFT, dp(16)));
             missing.setPadding(0, dp(26), 0, dp(26));
             return missing;
         }
+        return images;
+    }
+
+    private void showImageViewer(String imagePath) {
+        File imageFile = new File(imagePath);
+        if (!imageFile.exists()) {
+            return;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(requireContext()).create();
+        ScrollView scrollView = new ScrollView(requireContext());
         ImageView image = new ImageView(requireContext());
         image.setImageURI(Uri.fromFile(imageFile));
         image.setAdjustViewBounds(true);
-        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        image.setBackground(round(COLOR_SURFACE_SOFT, dp(16)));
-        image.setMinimumHeight(dp(220));
-        return image;
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int padding = dp(10);
+        scrollView.setPadding(padding, padding, padding, padding);
+        scrollView.addView(image, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        dialog.setView(scrollView);
+        dialog.show();
     }
 
     private ImageView iconBubble(String iconKey, int iconSizeDp) {
         ImageView image = new ImageView(requireContext());
-        image.setImageResource(CategoryIconMapper.drawableResId(requireContext(), iconKey));
-        image.setColorFilter(COLOR_TEXT);
+        CategoryIconMapper.loadInto(image, iconKey, repository, COLOR_TEXT);
         image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         image.setPadding(dp(13), dp(13), dp(13), dp(13));
         image.setBackground(round(COLOR_BEE_SOFT, dp(32)));

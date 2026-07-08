@@ -3,6 +3,7 @@ package com.example.quality.fragment;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -16,16 +17,21 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CountCategory;
+import com.example.quality.count.CountCustomIcon;
 import com.example.quality.count.CountRepository;
 import com.example.quality.R;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class FragmentCategoryManage extends Fragment {
@@ -45,11 +51,20 @@ public class FragmentCategoryManage extends Fragment {
     private TextView expenseTab;
     private TextView incomeTab;
     private LinearLayout categoryList;
+    private ActivityResultLauncher<String> customIconPickerLauncher;
+    private LinearLayout pendingCustomIconGrid;
+    private LinearLayout pendingBuiltinIconGrid;
+    private String[] pendingCustomIconSelection;
+    private String pendingReplacingCustomIconId;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         repository = new CountRepository(requireContext());
+        customIconPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                this::handleCustomIconPicked
+        );
     }
 
     @Override
@@ -267,9 +282,17 @@ public class FragmentCategoryManage extends Fragment {
                 editing ? CategoryIconMapper.normalize(editingCategory.icon) : CategoryIconMapper.defaultIcon(currentType)
         };
         LinearLayout.LayoutParams gridParams = matchWrap();
-        gridParams.setMargins(0, dp(10), 0, dp(18));
+        gridParams.setMargins(0, dp(10), 0, dp(14));
         sheet.addView(iconGrid, gridParams);
         renderIconGrid(iconGrid, selectedIcon);
+
+        TextView addIconTitle = text("新增图标", 14, COLOR_MUTED, false);
+        sheet.addView(addIconTitle);
+        LinearLayout customIconGrid = vertical();
+        LinearLayout.LayoutParams customGridParams = matchWrap();
+        customGridParams.setMargins(0, dp(10), 0, dp(18));
+        sheet.addView(customIconGrid, customGridParams);
+        renderCustomIconGrid(customIconGrid, iconGrid, selectedIcon);
 
         TextView save = text(editing ? "保存修改" : "保存类别", 16, COLOR_TEXT, true);
         save.setGravity(Gravity.CENTER);
@@ -286,21 +309,61 @@ public class FragmentCategoryManage extends Fragment {
 
     private void renderIconGrid(LinearLayout iconGrid, String[] selectedIcon) {
         iconGrid.removeAllViews();
-        String[] keys = CategoryIconMapper.ICON_KEYS;
-        for (int index = 0; index < keys.length; index += 5) {
+        List<String> iconRefs = new ArrayList<>();
+        for (String iconRef : CategoryIconMapper.ICON_KEYS) {
+            iconRefs.add(iconRef);
+        }
+        int totalItems = iconRefs.size();
+        for (int index = 0; index < totalItems; index += 5) {
             LinearLayout row = horizontal();
             row.setGravity(Gravity.CENTER);
             for (int column = 0; column < 5; column++) {
                 int itemIndex = index + column;
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(56), 1);
                 params.setMargins(dp(4), dp(4), dp(4), dp(4));
-                if (itemIndex < keys.length) {
-                    row.addView(iconOption(keys[itemIndex], iconGrid, selectedIcon), params);
+                if (itemIndex < iconRefs.size()) {
+                    row.addView(iconOption(iconRefs.get(itemIndex), iconGrid, selectedIcon), params);
                 } else {
                     row.addView(new SpaceView(requireContext()), params);
                 }
             }
             iconGrid.addView(row);
+        }
+    }
+
+    private void renderCustomIconGrid(LinearLayout customIconGrid, LinearLayout builtinIconGrid, String[] selectedIcon) {
+        customIconGrid.removeAllViews();
+        List<CountCustomIcon> customIcons = repository.getCustomIcons();
+        int totalItems = customIcons.size() + 2;
+        for (int index = 0; index < totalItems; index += 5) {
+            LinearLayout row = horizontal();
+            row.setGravity(Gravity.CENTER);
+            for (int column = 0; column < 5; column++) {
+                int itemIndex = index + column;
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(56), 1);
+                params.setMargins(dp(4), dp(4), dp(4), dp(4));
+                if (itemIndex < customIcons.size()) {
+                    row.addView(customIconOption(
+                            customIcons.get(itemIndex),
+                            customIconGrid,
+                            builtinIconGrid,
+                            selectedIcon
+                    ), params);
+                } else if (itemIndex == customIcons.size()) {
+                    row.addView(iconActionOption(
+                            R.drawable.ic_import,
+                            v -> launchCustomIconPicker(customIconGrid, builtinIconGrid, selectedIcon, null)
+                    ), params);
+                } else if (itemIndex == customIcons.size() + 1) {
+                    row.addView(iconActionOption(
+                            R.drawable.ic_compress,
+                            v -> Toast.makeText(requireContext(), "压缩包导入稍后支持", Toast.LENGTH_SHORT).show()
+                    ), params);
+                } else {
+                    row.addView(new SpaceView(requireContext()), params);
+                }
+            }
+            customIconGrid.addView(row);
         }
     }
 
@@ -314,8 +377,7 @@ public class FragmentCategoryManage extends Fragment {
                 selected ? 2 : 1
         ));
         ImageView icon = new ImageView(requireContext());
-        icon.setImageResource(CategoryIconMapper.drawableResId(requireContext(), iconKey));
-        icon.setColorFilter(COLOR_TEXT);
+        CategoryIconMapper.loadInto(icon, iconKey, repository, COLOR_TEXT);
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER);
         box.addView(icon, iconParams);
@@ -326,16 +388,163 @@ public class FragmentCategoryManage extends Fragment {
         return box;
     }
 
+    private View customIconOption(
+            CountCustomIcon customIcon,
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon
+    ) {
+        FrameLayout box = new FrameLayout(requireContext());
+        String iconRef = customIcon.iconRef();
+        boolean selected = iconRef.equals(selectedIcon[0]);
+        box.setBackground(roundStroke(
+                selected ? COLOR_BEE_SOFT : COLOR_SURFACE_SOFT,
+                dp(14),
+                selected ? COLOR_BEE : COLOR_LINE,
+                selected ? 2 : 1
+        ));
+        ImageView icon = new ImageView(requireContext());
+        CategoryIconMapper.loadInto(icon, iconRef, repository, COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER);
+        box.addView(icon, iconParams);
+        box.setOnClickListener(v -> {
+            selectedIcon[0] = iconRef;
+            renderIconGrid(builtinIconGrid, selectedIcon);
+            renderCustomIconGrid(customIconGrid, builtinIconGrid, selectedIcon);
+        });
+        box.setOnLongClickListener(v -> {
+            showCustomIconActions(customIcon, customIconGrid, builtinIconGrid, selectedIcon);
+            return true;
+        });
+        return box;
+    }
+
+    private View iconActionOption(int iconResId, View.OnClickListener listener) {
+        FrameLayout box = new FrameLayout(requireContext());
+        box.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
+        box.setOnClickListener(listener);
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(iconResId);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(25), dp(25), Gravity.CENTER);
+        box.addView(icon, iconParams);
+        return box;
+    }
+
+    private void showCustomIconActions(
+            CountCustomIcon customIcon,
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon
+    ) {
+        BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
+        LinearLayout sheet = vertical();
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(22));
+        sheet.setBackgroundColor(COLOR_SURFACE);
+        TextView title = text("图标操作", 18, COLOR_TEXT, true);
+        title.setPadding(dp(2), 0, 0, dp(12));
+        sheet.addView(title);
+        sheet.addView(actionRow(R.drawable.ic_import, "替换图标", "使用新图片替换当前图标", v -> {
+            dialog.dismiss();
+            launchCustomIconPicker(customIconGrid, builtinIconGrid, selectedIcon, customIcon.id);
+        }));
+        sheet.addView(actionRow(R.drawable.ic_category_setting, "删除图标", "使用该图标的类别会切换为默认图标", v -> {
+            dialog.dismiss();
+            repository.deleteCustomIcon(customIcon.id);
+            if (customIcon.iconRef().equals(selectedIcon[0])) {
+                selectedIcon[0] = CategoryIconMapper.defaultIcon(currentType);
+            }
+            renderIconGrid(builtinIconGrid, selectedIcon);
+            renderCustomIconGrid(customIconGrid, builtinIconGrid, selectedIcon);
+            refreshPage();
+            Toast.makeText(requireContext(), "图标已删除", Toast.LENGTH_SHORT).show();
+        }));
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    private View actionRow(int iconResId, String title, String subtitle, View.OnClickListener listener) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        row.setBackground(round(COLOR_SURFACE_SOFT, dp(16)));
+        row.setOnClickListener(listener);
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(iconResId);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        icon.setPadding(dp(8), dp(8), dp(8), dp(8));
+        icon.setBackground(round(COLOR_BEE_SOFT, dp(19)));
+        row.addView(icon, fixed(dp(38), dp(38)));
+        LinearLayout copy = vertical();
+        TextView titleView = text(title, 15, COLOR_TEXT, true);
+        TextView subtitleView = text(subtitle, 12, COLOR_MUTED, false);
+        subtitleView.setPadding(0, dp(2), 0, 0);
+        copy.addView(titleView);
+        copy.addView(subtitleView);
+        LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        copyParams.setMargins(dp(12), 0, 0, 0);
+        row.addView(copy, copyParams);
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.setMargins(0, 0, 0, dp(10));
+        row.setLayoutParams(rowParams);
+        return row;
+    }
+
+    private void launchCustomIconPicker(
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            @Nullable String replaceId
+    ) {
+        pendingCustomIconGrid = customIconGrid;
+        pendingBuiltinIconGrid = builtinIconGrid;
+        pendingCustomIconSelection = selectedIcon;
+        pendingReplacingCustomIconId = replaceId;
+        customIconPickerLauncher.launch("image/*");
+    }
+
     private ImageView iconView(String iconKey, int sizeDp) {
         ImageView image = new ImageView(requireContext());
-        image.setImageResource(CategoryIconMapper.drawableResId(requireContext(), iconKey));
-        image.setColorFilter(COLOR_TEXT);
+        CategoryIconMapper.loadInto(image, iconKey, repository, COLOR_TEXT);
         image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         image.setBackground(round(COLOR_BEE_SOFT, dp(24)));
         image.setPadding(dp(8), dp(8), dp(8), dp(8));
         image.setMinimumWidth(dp(sizeDp));
         image.setMinimumHeight(dp(sizeDp));
         return image;
+    }
+
+    private void handleCustomIconPicked(Uri uri) {
+        if (uri == null || pendingCustomIconGrid == null || pendingCustomIconSelection == null) {
+            clearPendingCustomIconPicker();
+            return;
+        }
+        try {
+            CountCustomIcon icon = pendingReplacingCustomIconId == null
+                    ? repository.importCustomIcon(uri)
+                    : repository.replaceCustomIcon(pendingReplacingCustomIconId, uri);
+            pendingCustomIconSelection[0] = icon.iconRef();
+            if (pendingBuiltinIconGrid != null) {
+                renderIconGrid(pendingBuiltinIconGrid, pendingCustomIconSelection);
+            }
+            renderCustomIconGrid(pendingCustomIconGrid, pendingBuiltinIconGrid, pendingCustomIconSelection);
+            refreshPage();
+            Toast.makeText(requireContext(), "图标已导入", Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            Toast.makeText(requireContext(), "无法导入图标，请选择 PNG/WebP/JPG 图片", Toast.LENGTH_SHORT).show();
+        } finally {
+            clearPendingCustomIconPicker();
+        }
+    }
+
+    private void clearPendingCustomIconPicker() {
+        pendingCustomIconGrid = null;
+        pendingBuiltinIconGrid = null;
+        pendingCustomIconSelection = null;
+        pendingReplacingCustomIconId = null;
     }
 
     private void saveCategory(

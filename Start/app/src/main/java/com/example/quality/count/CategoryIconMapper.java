@@ -1,46 +1,50 @@
 package com.example.quality.count;
 
 import android.content.Context;
+import android.net.Uri;
+import android.widget.ImageView;
 
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
 public final class CategoryIconMapper {
-    public static final String DEFAULT_ICON = "list";
-    public static final String DEFAULT_EXPENSE_ICON = "expend";
-    public static final String DEFAULT_INCOME_ICON = "income";
+    public static final String BUILTIN_PREFIX = "builtin:";
+    public static final String CUSTOM_PREFIX = "custom:";
+    public static final String DEFAULT_ICON = BUILTIN_PREFIX + "list";
+    public static final String DEFAULT_EXPENSE_ICON = BUILTIN_PREFIX + "expend";
+    public static final String DEFAULT_INCOME_ICON = BUILTIN_PREFIX + "income";
 
     public static final String[] ICON_KEYS = {
-            "expend",
-            "income",
-            "food",
-            "car",
-            "goods",
-            "medic",
-            "learning",
-            "bottle",
-            "cloth",
-            "digital",
-            "tissue",
-            "book",
-            "salary",
-            "parttime_job",
-            "city_break",
-            "communicartion",
-            "delivery",
-            "entertainment",
-            "financing",
-            "game",
-            "gift_money",
-            "list",
-            "rice",
-            "school",
-            "setting",
-            "snack",
-            "team",
-            "trip",
-            "wash"
+            BUILTIN_PREFIX + "expend",
+            BUILTIN_PREFIX + "income",
+            BUILTIN_PREFIX + "food",
+            BUILTIN_PREFIX + "car",
+            BUILTIN_PREFIX + "goods",
+            BUILTIN_PREFIX + "medic",
+            BUILTIN_PREFIX + "learning",
+            BUILTIN_PREFIX + "bottle",
+            BUILTIN_PREFIX + "cloth",
+            BUILTIN_PREFIX + "digital",
+            BUILTIN_PREFIX + "tissue",
+            BUILTIN_PREFIX + "book",
+            BUILTIN_PREFIX + "salary",
+            BUILTIN_PREFIX + "parttime_job",
+            BUILTIN_PREFIX + "city_break",
+            BUILTIN_PREFIX + "communicartion",
+            BUILTIN_PREFIX + "delivery",
+            BUILTIN_PREFIX + "entertainment",
+            BUILTIN_PREFIX + "financing",
+            BUILTIN_PREFIX + "game",
+            BUILTIN_PREFIX + "gift_money",
+            BUILTIN_PREFIX + "list",
+            BUILTIN_PREFIX + "rice",
+            BUILTIN_PREFIX + "school",
+            BUILTIN_PREFIX + "setting",
+            BUILTIN_PREFIX + "snack",
+            BUILTIN_PREFIX + "team",
+            BUILTIN_PREFIX + "trip",
+            BUILTIN_PREFIX + "wash"
     };
 
     private static final Set<String> ICON_KEY_SET = new HashSet<>(Arrays.asList(ICON_KEYS));
@@ -58,17 +62,24 @@ public final class CategoryIconMapper {
             return DEFAULT_ICON;
         }
         String icon = rawIcon.trim();
-        if (icon.startsWith("ic_category_")) {
-            icon = icon.substring("ic_category_".length());
+        if (isCustom(icon)) {
+            return icon;
         }
         return ICON_KEY_SET.contains(icon) ? icon : DEFAULT_ICON;
     }
 
+    public static boolean isCustom(String iconRef) {
+        return iconRef != null && iconRef.startsWith(CUSTOM_PREFIX) && iconRef.length() > CUSTOM_PREFIX.length();
+    }
+
     public static int drawableResId(Context context, String iconKey) {
         String normalized = normalize(iconKey);
-        if (DEFAULT_EXPENSE_ICON.equals(normalized) || DEFAULT_INCOME_ICON.equals(normalized)) {
+        String key = normalized.startsWith(BUILTIN_PREFIX)
+                ? normalized.substring(BUILTIN_PREFIX.length())
+                : normalized;
+        if ("expend".equals(key) || "income".equals(key)) {
             int resId = context.getResources().getIdentifier(
-                    "ic_" + normalized,
+                    "ic_" + key,
                     "drawable",
                     context.getPackageName()
             );
@@ -77,7 +88,7 @@ public final class CategoryIconMapper {
             }
         }
         int resId = context.getResources().getIdentifier(
-                "ic_category_" + normalized,
+                "ic_category_" + key,
                 "drawable",
                 context.getPackageName()
         );
@@ -89,6 +100,21 @@ public final class CategoryIconMapper {
                 "drawable",
                 context.getPackageName()
         );
+    }
+
+    public static void loadInto(ImageView imageView, String iconRef, CountRepository repository, int tintColor) {
+        String normalized = normalize(iconRef);
+        imageView.clearColorFilter();
+        if (isCustom(normalized)) {
+            CountCustomIcon icon = repository.getCustomIcon(normalized.substring(CUSTOM_PREFIX.length()));
+            if (icon != null && icon.fileName != null && !icon.fileName.trim().isEmpty()) {
+                imageView.setImageURI(Uri.fromFile(repository.customIconFile(icon.fileName)));
+                imageView.setColorFilter(tintColor);
+                return;
+            }
+        }
+        imageView.setImageResource(drawableResId(imageView.getContext(), normalized));
+        imageView.setColorFilter(tintColor);
     }
 
     public static String suggestedIcon(String name, String type) {

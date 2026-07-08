@@ -401,8 +401,7 @@ public class FragmentCountStats extends Fragment {
 
     private ImageView iconBubble(String icon) {
         ImageView bubble = new ImageView(requireContext());
-        bubble.setImageResource(CategoryIconMapper.drawableResId(requireContext(), icon));
-        bubble.setColorFilter(COLOR_TEXT);
+        CategoryIconMapper.loadInto(bubble, icon, repository, COLOR_TEXT);
         bubble.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         bubble.setPadding(dp(9), dp(9), dp(9), dp(9));
         bubble.setBackground(round(COLOR_BEE_SOFT, dp(20)));

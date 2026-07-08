@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
@@ -32,6 +33,7 @@ import androidx.fragment.app.Fragment;
 import com.example.quality.R;
 import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CountCategory;
+import com.example.quality.count.CountCustomIcon;
 import com.example.quality.count.CountImportResult;
 import com.example.quality.count.CountImportService;
 import com.example.quality.count.CountRepository;
@@ -46,15 +48,23 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 public class FragmentCount extends Fragment {
     private static final String TAG = "FragmentCount";
@@ -63,6 +73,7 @@ public class FragmentCount extends Fragment {
     private static final String EXPORT_COUNT = "count";
     private static final String EXPORT_QUALITY = "quality";
     private static final String QUALITY_FILE_NAME = "quality_record.json";
+    private static final String QUALITY_ITEMS_FILE_NAME = "quality_items.json";
     private static final int COLOR_BEE = 0xFFF8C91C;
     private static final int COLOR_BEE_SOFT = 0xFFFFF4BF;
     private static final int COLOR_BACKGROUND = 0xFFFFFBF4;
@@ -86,15 +97,27 @@ public class FragmentCount extends Fragment {
     private LinearLayout transactionList;
     private ActivityResultLauncher<String[]> importFileLauncher;
     private ActivityResultLauncher<String> exportFileLauncher;
+    private ActivityResultLauncher<String> exportZipFileLauncher;
     private ActivityResultLauncher<Uri> cameraLauncher;
+    private ActivityResultLauncher<String> imagePickerLauncher;
+    private ActivityResultLauncher<String> customIconPickerLauncher;
     private String pendingImportSource;
     private String pendingExportType;
     private File pendingPhotoFile;
+    private EntryDraft pendingImageDraft;
+    private Runnable pendingImageRefresh;
+    private boolean pendingPhotoOpensNewRecord;
+    private LinearLayout pendingCustomIconGrid;
+    private LinearLayout pendingBuiltinIconGrid;
+    private String[] pendingCustomIconSelection;
+    private String pendingReplacingCustomIconId;
+    private String pendingCustomIconType;
 
     private static class CategorySelection {
         List<CountCategory> categories = new ArrayList<>();
         CountCategory selectedCategory;
         Long preferredCategoryId;
+        String type = TYPE_EXPENSE;
     }
 
     private static class EntryDraft {
@@ -104,9 +127,21 @@ public class FragmentCount extends Fragment {
         Double pendingAmount;
         String pendingOperator;
         LocalDate date = LocalDate.now();
-        String imagePath;
-        boolean deleteImageOnCancel;
+        List<String> imagePaths = new ArrayList<>();
+        List<String> originalImagePaths = new ArrayList<>();
+        Set<String> addedImagePaths = new HashSet<>();
+        Set<String> removedImagePaths = new HashSet<>();
         boolean entrySaved;
+    }
+
+    private static class ImageExportItem {
+        final File file;
+        final String relativePath;
+
+        ImageExportItem(File file, String relativePath) {
+            this.file = file;
+            this.relativePath = relativePath;
+        }
     }
 
     @Override
@@ -128,9 +163,21 @@ public class FragmentCount extends Fragment {
                 new ActivityResultContracts.CreateDocument("text/csv"),
                 this::handleExportFile
         );
+        exportZipFileLauncher = registerForActivityResult(
+                new ActivityResultContracts.CreateDocument("application/zip"),
+                this::handleCountZipExportFile
+        );
         cameraLauncher = registerForActivityResult(
                 new ActivityResultContracts.TakePicture(),
                 this::handlePhotoTaken
+        );
+        imagePickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                this::handleImagePicked
+        );
+        customIconPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                this::handleCustomIconPicked
         );
     }
 
@@ -374,14 +421,22 @@ public class FragmentCount extends Fragment {
     }
 
     private void showEntrySheet() {
-        showEntrySheet(null, null);
+        showEntrySheet(null, new ArrayList<>());
     }
 
     private void showEntrySheet(@Nullable CountTransaction editingTx) {
-        showEntrySheet(editingTx, editingTx == null ? null : editingTx.imagePath);
+        showEntrySheet(editingTx, editingTx == null ? new ArrayList<>() : editingTx.imagePaths);
     }
 
     private void showEntrySheet(@Nullable CountTransaction editingTx, @Nullable String imagePath) {
+        List<String> imagePaths = new ArrayList<>();
+        if (imagePath != null && !imagePath.trim().isEmpty()) {
+            imagePaths.add(imagePath);
+        }
+        showEntrySheet(editingTx, imagePaths);
+    }
+
+    private void showEntrySheet(@Nullable CountTransaction editingTx, @Nullable List<String> imagePaths) {
         BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
         EntryDraft draft = new EntryDraft();
         if (editingTx == null) {
@@ -392,8 +447,14 @@ public class FragmentCount extends Fragment {
             draft.amount = amountInputText(editingTx.amount);
             draft.date = editingTx.date;
         }
-        draft.imagePath = imagePath;
-        draft.deleteImageOnCancel = editingTx == null && imagePath != null && !imagePath.trim().isEmpty();
+        if (imagePaths != null) {
+            draft.imagePaths.addAll(imagePaths);
+            if (editingTx == null) {
+                draft.addedImagePaths.addAll(imagePaths);
+            } else {
+                draft.originalImagePaths.addAll(imagePaths);
+            }
+        }
 
         LinearLayout sheet = vertical();
         sheet.setPadding(dp(18), dp(16), dp(18), dp(20));
@@ -455,11 +516,13 @@ public class FragmentCount extends Fragment {
         noteParams.setMargins(0, 0, 0, dp(2));
         sheet.addView(noteCard(noteInput), noteParams);
 
-        if (draft.imagePath != null && !draft.imagePath.trim().isEmpty()) {
-            LinearLayout.LayoutParams photoParams = matchWrap();
-            photoParams.setMargins(0, dp(10), 0, 0);
-            sheet.addView(photoPreviewCard(draft.imagePath), photoParams);
-        }
+        LinearLayout photoSection = vertical();
+        LinearLayout.LayoutParams photoParams = matchWrap();
+        photoParams.setMargins(0, dp(10), 0, 0);
+        sheet.addView(photoSection, photoParams);
+        final Runnable[] refreshImages = new Runnable[1];
+        refreshImages[0] = () -> renderPhotoAttachmentCard(photoSection, draft, refreshImages[0]);
+        refreshImages[0].run();
 
         Runnable refreshCategories = () -> {
             fillCategorySelection(draft.type, categorySelection);
@@ -485,9 +548,11 @@ public class FragmentCount extends Fragment {
         sheet.addView(buildKeypad(dialog, draft, amountDisplay, categorySelection, noteInput));
         dialog.setContentView(sheet);
         dialog.setOnDismissListener(ignored -> {
-            if (draft.deleteImageOnCancel && !draft.entrySaved) {
-                deleteImageFile(draft.imagePath);
+            if (!draft.entrySaved) {
+                deleteAddedImages(draft);
             }
+            pendingImageDraft = null;
+            pendingImageRefresh = null;
         });
         dialog.show();
     }
@@ -658,7 +723,7 @@ public class FragmentCount extends Fragment {
                     category.id,
                     draft.date,
                     noteInput.getText().toString().trim(),
-                    draft.imagePath
+                    draft.imagePaths
             );
         } else {
             repository.updateTransaction(
@@ -667,9 +732,11 @@ public class FragmentCount extends Fragment {
                     amount,
                     category.id,
                     draft.date,
-                    noteInput.getText().toString().trim()
+                    noteInput.getText().toString().trim(),
+                    draft.imagePaths
             );
         }
+        deleteRemovedImages(draft);
         selectedMonth = draft.date.withDayOfMonth(1);
         refreshMonthView();
         draft.entrySaved = true;
@@ -677,6 +744,7 @@ public class FragmentCount extends Fragment {
     }
 
     private void fillCategorySelection(String type, CategorySelection selection) {
+        selection.type = type;
         selection.categories = repository.getCategories(type);
         selection.selectedCategory = null;
         if (selection.preferredCategoryId != null) {
@@ -769,7 +837,8 @@ public class FragmentCount extends Fragment {
         grid.setPadding(0, dp(12), 0, 0);
         scrollView.addView(grid);
 
-        for (int index = 0; index < selection.categories.size(); index += 4) {
+        int totalItems = selection.categories.size() + 1;
+        for (int index = 0; index < totalItems; index += 4) {
             LinearLayout row = horizontal();
             row.setGravity(Gravity.CENTER);
             for (int column = 0; column < 4; column++) {
@@ -779,6 +848,8 @@ public class FragmentCount extends Fragment {
                 if (itemIndex < selection.categories.size()) {
                     CountCategory category = selection.categories.get(itemIndex);
                     row.addView(categoryPickerCell(category, selection, onSelected, dialog), params);
+                } else if (itemIndex == selection.categories.size()) {
+                    row.addView(categoryPickerAddCell(selection, onSelected, dialog), params);
                 } else {
                     row.addView(new View(requireContext()), params);
                 }
@@ -786,7 +857,7 @@ public class FragmentCount extends Fragment {
             grid.addView(row);
         }
 
-        int rowCount = (selection.categories.size() + 3) / 4;
+        int rowCount = (totalItems + 3) / 4;
         sheet.addView(scrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Math.min(dp(380), Math.max(dp(120), dp(94) * rowCount))
@@ -828,6 +899,288 @@ public class FragmentCount extends Fragment {
             dialog.dismiss();
         });
         return cell;
+    }
+
+    private View categoryPickerAddCell(
+            CategorySelection selection,
+            Runnable onSelected,
+            BottomSheetDialog pickerDialog
+    ) {
+        LinearLayout cell = vertical();
+        cell.setGravity(Gravity.CENTER);
+        cell.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(16), COLOR_LINE, 1));
+
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(R.drawable.ic_add);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        icon.setBackground(round(0xFFFFF7D1, dp(19)));
+        icon.setPadding(dp(8), dp(8), dp(8), dp(8));
+        cell.addView(icon, fixed(dp(38), dp(38)));
+
+        TextView name = text("新增", 12, COLOR_TEXT, false);
+        name.setGravity(Gravity.CENTER);
+        name.setPadding(dp(3), dp(7), dp(3), 0);
+        cell.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        cell.setOnClickListener(v -> {
+            pickerDialog.dismiss();
+            showInlineCategoryEditor(selection, onSelected);
+        });
+        return cell;
+    }
+
+    private void showInlineCategoryEditor(CategorySelection selection, Runnable onSelected) {
+        BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
+        LinearLayout sheet = vertical();
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(22));
+        sheet.setBackgroundColor(COLOR_SURFACE);
+
+        TextView title = text("新增类别", 18, COLOR_TEXT, true);
+        title.setGravity(Gravity.CENTER);
+        sheet.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(32)
+        ));
+
+        EditText nameInput = new EditText(requireContext());
+        nameInput.setHint("输入类别名称");
+        nameInput.setSingleLine(true);
+        nameInput.setTextColor(COLOR_TEXT);
+        nameInput.setHintTextColor(0xFF9CA3AF);
+        nameInput.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
+        nameInput.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(50)
+        );
+        inputParams.setMargins(0, dp(14), 0, dp(14));
+        sheet.addView(nameInput, inputParams);
+
+        TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
+        sheet.addView(iconTitle);
+
+        LinearLayout iconGrid = vertical();
+        String[] selectedIcon = {CategoryIconMapper.defaultIcon(selection.type)};
+        LinearLayout.LayoutParams gridParams = matchWrap();
+        gridParams.setMargins(0, dp(10), 0, dp(14));
+        sheet.addView(iconGrid, gridParams);
+        renderInlineCategoryIconGrid(iconGrid, selectedIcon);
+
+        TextView addIconTitle = text("新增图标", 14, COLOR_MUTED, false);
+        sheet.addView(addIconTitle);
+        LinearLayout.LayoutParams actionsParams = matchWrap();
+        actionsParams.setMargins(0, dp(10), 0, dp(18));
+        LinearLayout customIconGrid = vertical();
+        sheet.addView(customIconGrid, actionsParams);
+        renderInlineCustomIconGrid(customIconGrid, iconGrid, selectedIcon, selection.type);
+
+        TextView save = text("保存类别", 16, COLOR_TEXT, true);
+        save.setGravity(Gravity.CENTER);
+        save.setBackground(round(COLOR_BEE, dp(16)));
+        save.setOnClickListener(v -> {
+            String name = nameInput.getText().toString().trim();
+            if (name.isEmpty()) {
+                Toast.makeText(requireContext(), "请输入类别名称", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            long categoryId = repository.addCategory(name, selection.type, selectedIcon[0]);
+            selection.preferredCategoryId = categoryId;
+            fillCategorySelection(selection.type, selection);
+            onSelected.run();
+            Toast.makeText(requireContext(), "类别已保存", Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+        sheet.addView(save, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(50)
+        ));
+
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    private void renderInlineCategoryIconGrid(LinearLayout iconGrid, String[] selectedIcon) {
+        iconGrid.removeAllViews();
+        List<String> iconRefs = new ArrayList<>();
+        for (String iconRef : CategoryIconMapper.ICON_KEYS) {
+            iconRefs.add(iconRef);
+        }
+        int totalItems = iconRefs.size();
+        for (int index = 0; index < totalItems; index += 5) {
+            LinearLayout row = horizontal();
+            row.setGravity(Gravity.CENTER);
+            for (int column = 0; column < 5; column++) {
+                int itemIndex = index + column;
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(56), 1);
+                params.setMargins(dp(4), dp(4), dp(4), dp(4));
+                if (itemIndex < iconRefs.size()) {
+                    row.addView(inlineCategoryIconOption(iconRefs.get(itemIndex), iconGrid, selectedIcon), params);
+                } else {
+                    row.addView(new View(requireContext()), params);
+                }
+            }
+            iconGrid.addView(row);
+        }
+    }
+
+    private View inlineCategoryIconOption(String iconKey, LinearLayout iconGrid, String[] selectedIcon) {
+        FrameLayout box = new FrameLayout(requireContext());
+        boolean selected = iconKey.equals(selectedIcon[0]);
+        box.setBackground(roundStroke(
+                selected ? COLOR_BEE_SOFT : COLOR_SURFACE_SOFT,
+                dp(14),
+                selected ? COLOR_BEE : COLOR_LINE,
+                selected ? 2 : 1
+        ));
+        ImageView icon = new ImageView(requireContext());
+        CategoryIconMapper.loadInto(icon, iconKey, repository, COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER);
+        box.addView(icon, iconParams);
+        box.setOnClickListener(v -> {
+            selectedIcon[0] = iconKey;
+            renderInlineCategoryIconGrid(iconGrid, selectedIcon);
+        });
+        return box;
+    }
+
+    private void renderInlineCustomIconGrid(
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            String type
+    ) {
+        customIconGrid.removeAllViews();
+        List<CountCustomIcon> customIcons = repository.getCustomIcons();
+        int totalItems = customIcons.size() + 2;
+        for (int index = 0; index < totalItems; index += 5) {
+            LinearLayout row = horizontal();
+            row.setGravity(Gravity.CENTER);
+            for (int column = 0; column < 5; column++) {
+                int itemIndex = index + column;
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(56), 1);
+                params.setMargins(dp(4), dp(4), dp(4), dp(4));
+                if (itemIndex < customIcons.size()) {
+                    row.addView(inlineCustomIconOption(
+                            customIcons.get(itemIndex),
+                            customIconGrid,
+                            builtinIconGrid,
+                            selectedIcon,
+                            type
+                    ), params);
+                } else if (itemIndex == customIcons.size()) {
+                    row.addView(inlineIconActionOption(
+                            R.drawable.ic_import,
+                            v -> launchCustomIconPicker(customIconGrid, builtinIconGrid, selectedIcon, null, type)
+                    ), params);
+                } else if (itemIndex == customIcons.size() + 1) {
+                    row.addView(inlineIconActionOption(
+                            R.drawable.ic_compress,
+                            v -> Toast.makeText(requireContext(), "压缩包导入稍后支持", Toast.LENGTH_SHORT).show()
+                    ), params);
+                } else {
+                    row.addView(new View(requireContext()), params);
+                }
+            }
+            customIconGrid.addView(row);
+        }
+    }
+
+    private View inlineCustomIconOption(
+            CountCustomIcon customIcon,
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            String type
+    ) {
+        FrameLayout box = new FrameLayout(requireContext());
+        String iconRef = customIcon.iconRef();
+        boolean selected = iconRef.equals(selectedIcon[0]);
+        box.setBackground(roundStroke(
+                selected ? COLOR_BEE_SOFT : COLOR_SURFACE_SOFT,
+                dp(14),
+                selected ? COLOR_BEE : COLOR_LINE,
+                selected ? 2 : 1
+        ));
+        ImageView icon = new ImageView(requireContext());
+        CategoryIconMapper.loadInto(icon, iconRef, repository, COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER);
+        box.addView(icon, iconParams);
+        box.setOnClickListener(v -> {
+            selectedIcon[0] = iconRef;
+            renderInlineCategoryIconGrid(builtinIconGrid, selectedIcon);
+            renderInlineCustomIconGrid(customIconGrid, builtinIconGrid, selectedIcon, type);
+        });
+        box.setOnLongClickListener(v -> {
+            showInlineCustomIconActions(customIcon, customIconGrid, builtinIconGrid, selectedIcon, type);
+            return true;
+        });
+        return box;
+    }
+
+    private View inlineIconActionOption(int iconResId, View.OnClickListener listener) {
+        FrameLayout box = new FrameLayout(requireContext());
+        box.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
+        box.setOnClickListener(listener);
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(iconResId);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(25), dp(25), Gravity.CENTER);
+        box.addView(icon, iconParams);
+        return box;
+    }
+
+    private void showInlineCustomIconActions(
+            CountCustomIcon customIcon,
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            String type
+    ) {
+        BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
+        LinearLayout sheet = vertical();
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(22));
+        sheet.setBackgroundColor(COLOR_SURFACE);
+        TextView title = text("图标操作", 18, COLOR_TEXT, true);
+        title.setPadding(dp(2), 0, 0, dp(12));
+        sheet.addView(title);
+        sheet.addView(actionSheetItem(R.drawable.ic_import, "替换图标", "使用新图片替换当前图标", v -> {
+            dialog.dismiss();
+            launchCustomIconPicker(customIconGrid, builtinIconGrid, selectedIcon, customIcon.id, type);
+        }));
+        sheet.addView(actionSheetItem(R.drawable.ic_category_setting, "删除图标", "使用该图标的类别会切换为默认图标", v -> {
+            dialog.dismiss();
+            repository.deleteCustomIcon(customIcon.id);
+            if (customIcon.iconRef().equals(selectedIcon[0])) {
+                selectedIcon[0] = CategoryIconMapper.defaultIcon(type);
+            }
+            renderInlineCategoryIconGrid(builtinIconGrid, selectedIcon);
+            renderInlineCustomIconGrid(customIconGrid, builtinIconGrid, selectedIcon, type);
+            refreshMonthView();
+            Toast.makeText(requireContext(), "图标已删除", Toast.LENGTH_SHORT).show();
+        }));
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    private void launchCustomIconPicker(
+            LinearLayout customIconGrid,
+            LinearLayout builtinIconGrid,
+            String[] selectedIcon,
+            @Nullable String replaceId,
+            String type
+    ) {
+        pendingCustomIconGrid = customIconGrid;
+        pendingBuiltinIconGrid = builtinIconGrid;
+        pendingCustomIconSelection = selectedIcon;
+        pendingReplacingCustomIconId = replaceId;
+        pendingCustomIconType = type;
+        customIconPickerLauncher.launch("image/*");
     }
 
     private void showDateStepDialog(EntryDraft draft, TextView dateButton) {
@@ -895,6 +1248,9 @@ public class FragmentCount extends Fragment {
                 .setNegativeButton("取消", null)
                 .setPositiveButton("删除", (dialog, which) -> {
                     repository.deleteTransaction(tx.id);
+                    for (String imagePath : tx.imagePaths) {
+                        deleteImageFile(imagePath);
+                    }
                     refreshMonthView();
                 })
                 .show();
@@ -946,7 +1302,7 @@ public class FragmentCount extends Fragment {
             dialog.dismiss();
             showImportSourceSheet();
         }));
-        sheet.addView(actionSheetItem(R.drawable.ic_export, "导出账单", "导出全部记账记录为 CSV", v -> {
+        sheet.addView(actionSheetItem(R.drawable.ic_export, "导出账单", "导出 CSV 与图片 ZIP 备份", v -> {
             dialog.dismiss();
             startExport(EXPORT_COUNT);
         }));
@@ -1028,12 +1384,21 @@ public class FragmentCount extends Fragment {
     }
 
     private void startExport(String exportType) {
-        if (exportFileLauncher == null) {
+        pendingExportType = exportType;
+        String date = LocalDate.now().format(DAY_FORMATTER);
+        if (EXPORT_COUNT.equals(exportType)) {
+            if (exportZipFileLauncher == null) {
+                pendingExportType = null;
+                return;
+            }
+            exportZipFileLauncher.launch("better_count_" + date + ".zip");
             return;
         }
-        pendingExportType = exportType;
-        String prefix = EXPORT_QUALITY.equals(exportType) ? "better_quality_" : "better_count_";
-        exportFileLauncher.launch(prefix + LocalDate.now().format(DAY_FORMATTER) + ".csv");
+        if (exportFileLauncher == null) {
+            pendingExportType = null;
+            return;
+        }
+        exportFileLauncher.launch("better_quality_" + date + ".csv");
     }
 
     private void handleExportFile(Uri uri) {
@@ -1062,50 +1427,168 @@ public class FragmentCount extends Fragment {
         }
     }
 
+    private void handleCountZipExportFile(Uri uri) {
+        if (uri == null || pendingExportType == null) {
+            pendingExportType = null;
+            return;
+        }
+        pendingExportType = null;
+        try (OutputStream output = requireContext().getContentResolver().openOutputStream(uri, "w")) {
+            if (output == null) {
+                throw new IOException("无法打开导出文件");
+            }
+            writeCountZip(output);
+            Toast.makeText(requireContext(), "导出成功", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            new AlertDialog.Builder(requireContext())
+                    .setTitle("导出失败")
+                    .setMessage(e.getMessage() == null ? "文件无法写入，请重试" : e.getMessage())
+                    .setPositiveButton("知道了", null)
+                    .show();
+        }
+    }
+
+    private void writeCountZip(OutputStream output) throws IOException {
+        List<ImageExportItem> images = new ArrayList<>();
+        String csv = buildCountCsv(images);
+        try (ZipOutputStream zip = new ZipOutputStream(output)) {
+            zip.putNextEntry(new ZipEntry("transactions.csv"));
+            zip.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+            zip.write(csv.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+
+            byte[] buffer = new byte[8192];
+            for (ImageExportItem image : images) {
+                zip.putNextEntry(new ZipEntry(image.relativePath));
+                try (InputStream input = new FileInputStream(image.file)) {
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        zip.write(buffer, 0, count);
+                    }
+                }
+                zip.closeEntry();
+            }
+        }
+    }
+
     private String buildCountCsv() {
+        return buildCountCsv(new ArrayList<>());
+    }
+
+    private String buildCountCsv(List<ImageExportItem> images) {
         StringBuilder builder = new StringBuilder();
-        builder.append("日期,类型,金额,分类,备注\n");
+        builder.append("日期,类型,金额,分类,备注,图片\n");
+        Set<String> usedImageNames = new HashSet<>();
         for (CountTransaction tx : repository.getAllTransactions()) {
+            String imageRelativePath = exportImagePaths(tx, images, usedImageNames);
             appendCsvRow(
                     builder,
                     tx.date.format(DAY_FORMATTER),
                     TYPE_INCOME.equals(tx.type) ? "收入" : "支出",
                     repository.formatMoney(tx.amount),
                     tx.categoryPath(),
-                    tx.note
+                    tx.note,
+                    imageRelativePath
             );
         }
         return builder.toString();
     }
 
-    private String buildQualityCsv() throws IOException, JSONException {
-        JSONArray records = readQualityRecords();
+    private String exportImagePaths(CountTransaction tx, List<ImageExportItem> images, Set<String> usedImageNames) {
+        if (tx.imagePaths == null || tx.imagePaths.isEmpty()) {
+            return "";
+        }
         StringBuilder builder = new StringBuilder();
-        builder.append("日期,运动,阅读,思维,口语,睡眠,随记\n");
+        for (String imagePath : tx.imagePaths) {
+            if (imagePath == null || imagePath.trim().isEmpty()) {
+                continue;
+            }
+            File imageFile = new File(imagePath);
+            if (!imageFile.exists() || !imageFile.isFile()) {
+                continue;
+            }
+            String fileName = uniqueExportFileName(imageFile.getName(), usedImageNames);
+            String relativePath = "images/" + fileName;
+            images.add(new ImageExportItem(imageFile, relativePath));
+            if (builder.length() > 0) {
+                builder.append("；");
+            }
+            builder.append(relativePath);
+        }
+        return builder.toString();
+    }
+
+    private String uniqueExportFileName(String rawName, Set<String> usedNames) {
+        String name = rawName == null || rawName.trim().isEmpty()
+                ? "image.jpg"
+                : rawName.trim();
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String extension = dot > 0 ? name.substring(dot) : ".jpg";
+        String candidate = base + extension;
+        int index = 2;
+        while (usedNames.contains(candidate)) {
+            candidate = base + "_" + index + extension;
+            index++;
+        }
+        usedNames.add(candidate);
+        return candidate;
+    }
+
+    private String buildQualityCsv() throws IOException, JSONException {
+        JSONObject data = readQualityRecordData();
+        JSONArray records = data.optJSONArray("records");
+        if (records == null) {
+            records = new JSONArray();
+        }
+        Map<String, String> itemNames = readQualityItemNames();
+        StringBuilder builder = new StringBuilder();
+        builder.append("日期,是否打卡,已打卡条目,未打卡条目,随记\n");
         for (int i = 0; i < records.length(); i++) {
             JSONObject record = records.optJSONObject(i);
             if (record == null) {
                 continue;
             }
-            JSONObject habits = record.optJSONObject("habits");
+            JSONArray items = record.optJSONArray("items");
+            StringBuilder checked = new StringBuilder();
+            StringBuilder unchecked = new StringBuilder();
+            boolean hasChecked = false;
+            if (items != null) {
+                for (int j = 0; j < items.length(); j++) {
+                    JSONObject item = items.optJSONObject(j);
+                    if (item == null) {
+                        continue;
+                    }
+                    String id = item.optString("id", "");
+                    String name = itemNames.containsKey(id) ? itemNames.get(id) : id;
+                    boolean value = item.optInt("value", 0) == 1;
+                    if (value) {
+                        hasChecked = true;
+                        appendJoinedName(checked, name);
+                    } else {
+                        appendJoinedName(unchecked, name);
+                    }
+                }
+            }
             appendCsvRow(
                     builder,
                     record.optString("date", ""),
-                    habitCsvValue(habits, "运动"),
-                    habitCsvValue(habits, "阅读"),
-                    habitCsvValue(habits, "思维"),
-                    habitCsvValue(habits, "口语"),
-                    habitCsvValue(habits, "睡眠"),
+                    hasChecked ? "1" : "0",
+                    checked.toString(),
+                    unchecked.toString(),
                     record.optString("note", "")
             );
         }
         return builder.toString();
     }
 
-    private JSONArray readQualityRecords() throws IOException, JSONException {
+    private JSONObject readQualityRecordData() throws IOException, JSONException {
         File file = new File(requireContext().getFilesDir(), QUALITY_FILE_NAME);
         if (!file.exists() || file.length() == 0) {
-            return new JSONArray();
+            JSONObject data = new JSONObject();
+            data.put("version", 2);
+            data.put("records", new JSONArray());
+            return data;
         }
         try (FileInputStream input = new FileInputStream(file)) {
             byte[] data = new byte[(int) file.length()];
@@ -1118,14 +1601,54 @@ public class FragmentCount extends Fragment {
                 readLength += count;
             }
             if (readLength <= 0) {
-                return new JSONArray();
+                JSONObject empty = new JSONObject();
+                empty.put("version", 2);
+                empty.put("records", new JSONArray());
+                return empty;
             }
-            return new JSONArray(new String(data, 0, readLength, StandardCharsets.UTF_8));
+            JSONObject recordData = new JSONObject(new String(data, 0, readLength, StandardCharsets.UTF_8));
+            if (recordData.optJSONArray("records") == null) {
+                recordData.put("records", new JSONArray());
+            }
+            return recordData;
         }
     }
 
-    private String habitCsvValue(JSONObject habits, String name) {
-        return habits != null && habits.optInt(name, 0) == 1 ? "1" : "0";
+    private Map<String, String> readQualityItemNames() throws IOException, JSONException {
+        Map<String, String> names = new HashMap<>();
+        File file = new File(requireContext().getFilesDir(), QUALITY_ITEMS_FILE_NAME);
+        if (!file.exists() || file.length() == 0) {
+            return names;
+        }
+        try (FileInputStream input = new FileInputStream(file)) {
+            byte[] data = new byte[(int) file.length()];
+            int readLength = 0;
+            while (readLength < data.length) {
+                int count = input.read(data, readLength, data.length - readLength);
+                if (count < 0) {
+                    break;
+                }
+                readLength += count;
+            }
+            JSONArray items = new JSONArray(new String(data, 0, readLength, StandardCharsets.UTF_8));
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item != null) {
+                    names.put(item.optString("id", ""), item.optString("name", ""));
+                }
+            }
+        }
+        return names;
+    }
+
+    private void appendJoinedName(StringBuilder builder, String name) {
+        if (name == null || name.isEmpty()) {
+            return;
+        }
+        if (builder.length() > 0) {
+            builder.append("、");
+        }
+        builder.append(name);
     }
 
     private void appendCsvRow(StringBuilder builder, String... values) {
@@ -1226,24 +1749,130 @@ public class FragmentCount extends Fragment {
         return card;
     }
 
-    private View photoPreviewCard(String imagePath) {
+    private void renderPhotoAttachmentCard(LinearLayout host, EntryDraft draft, Runnable refreshImages) {
+        host.removeAllViews();
         LinearLayout card = vertical();
         card.setPadding(dp(14), dp(8), dp(14), dp(12));
         card.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(16), COLOR_LINE, 1));
         TextView label = text("图片", 12, COLOR_MUTED, false);
         card.addView(label);
+
+        HorizontalScrollView scrollView = new HorizontalScrollView(requireContext());
+        scrollView.setHorizontalScrollBarEnabled(false);
+        scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout strip = horizontal();
+        strip.setPadding(0, dp(8), 0, 0);
+        scrollView.addView(strip);
+
+        for (String imagePath : draft.imagePaths) {
+            LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(dp(78), dp(78));
+            thumbParams.setMargins(0, 0, dp(10), 0);
+            strip.addView(imageThumbnailCell(imagePath, draft, refreshImages), thumbParams);
+        }
+        LinearLayout.LayoutParams addParams = new LinearLayout.LayoutParams(dp(78), dp(78));
+        strip.addView(addImageCell(draft, refreshImages), addParams);
+
+        card.addView(scrollView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(90)
+        ));
+        host.addView(card, matchWrap());
+    }
+
+    private View imageThumbnailCell(String imagePath, EntryDraft draft, Runnable refreshImages) {
+        FrameLayout frame = new FrameLayout(requireContext());
+        frame.setBackground(round(0xFFFFFFFF, dp(12)));
+
         ImageView preview = new ImageView(requireContext());
         preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        preview.setAdjustViewBounds(true);
         preview.setImageURI(Uri.fromFile(new File(imagePath)));
         preview.setBackground(round(0xFFFFFFFF, dp(12)));
-        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(
+        frame.addView(preview, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(118)
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        frame.setOnClickListener(v -> showImageViewer(imagePath));
+
+        TextView delete = text("×", 16, COLOR_TEXT, true);
+        delete.setGravity(Gravity.CENTER);
+        delete.setBackground(round(COLOR_BEE, dp(11)));
+        FrameLayout.LayoutParams deleteParams = new FrameLayout.LayoutParams(
+                dp(22),
+                dp(22),
+                Gravity.TOP | Gravity.END
         );
-        imageParams.setMargins(0, dp(8), 0, 0);
-        card.addView(preview, imageParams);
-        return card;
+        deleteParams.setMargins(0, dp(3), dp(3), 0);
+        frame.addView(delete, deleteParams);
+        delete.setOnClickListener(v -> {
+            draft.imagePaths.remove(imagePath);
+            if (draft.addedImagePaths.remove(imagePath)) {
+                deleteImageFile(imagePath);
+            } else if (draft.originalImagePaths.contains(imagePath)) {
+                draft.removedImagePaths.add(imagePath);
+            }
+            refreshImages.run();
+        });
+        return frame;
+    }
+
+    private View addImageCell(EntryDraft draft, Runnable refreshImages) {
+        LinearLayout cell = vertical();
+        cell.setGravity(Gravity.CENTER);
+        cell.setBackground(roundStroke(0xFFFFFFFF, dp(12), COLOR_LINE, 1));
+        ImageView icon = new ImageView(requireContext());
+        icon.setImageResource(R.drawable.ic_add);
+        icon.setColorFilter(COLOR_TEXT);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        cell.addView(icon, fixed(dp(30), dp(30)));
+        TextView label = text("添加", 12, COLOR_MUTED, false);
+        label.setGravity(Gravity.CENTER);
+        label.setPadding(0, dp(5), 0, 0);
+        cell.addView(label);
+        cell.setOnClickListener(v -> showAddImageOptions(draft, refreshImages));
+        return cell;
+    }
+
+    private void showAddImageOptions(EntryDraft draft, Runnable refreshImages) {
+        BottomSheetDialog dialog = new BottomSheetDialog(requireContext());
+        LinearLayout sheet = vertical();
+        sheet.setPadding(dp(18), dp(16), dp(18), dp(22));
+        sheet.setBackgroundColor(COLOR_SURFACE);
+
+        TextView title = text("添加图片", 18, COLOR_TEXT, true);
+        title.setPadding(dp(2), 0, 0, dp(12));
+        sheet.addView(title);
+        sheet.addView(actionSheetItem(R.drawable.ic_camera, "拍照", "拍摄一张新的附件图片", v -> {
+            dialog.dismiss();
+            startPhotoRecord(draft, refreshImages);
+        }));
+        sheet.addView(actionSheetItem(R.drawable.ic_add, "从相册选择", "选择一张已有图片", v -> {
+            dialog.dismiss();
+            pickImage(draft, refreshImages);
+        }));
+        dialog.setContentView(sheet);
+        dialog.show();
+    }
+
+    private void showImageViewer(String imagePath) {
+        File imageFile = new File(imagePath);
+        if (!imageFile.exists()) {
+            Toast.makeText(requireContext(), "图片文件不存在", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AlertDialog dialog = new AlertDialog.Builder(requireContext()).create();
+        ScrollView scrollView = new ScrollView(requireContext());
+        ImageView image = new ImageView(requireContext());
+        image.setImageURI(Uri.fromFile(imageFile));
+        image.setAdjustViewBounds(true);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int padding = dp(10);
+        scrollView.setPadding(padding, padding, padding, padding);
+        scrollView.addView(image, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        dialog.setView(scrollView);
+        dialog.show();
     }
 
     private TextView typeChip(String label, boolean selected) {
@@ -1306,7 +1935,7 @@ public class FragmentCount extends Fragment {
             dialog.dismiss();
             openCategoryManageFragment();
         }));
-        sheet.addView(actionSheetItem(R.drawable.ic_import, "导入数据", "从 Excel / CSV 批量导入", v -> {
+        sheet.addView(actionSheetItem(R.drawable.ic_import, "导入 / 导出", "导入账单或导出备份数据", v -> {
             dialog.dismiss();
             showImportDialog();
         }));
@@ -1320,10 +1949,17 @@ public class FragmentCount extends Fragment {
     }
 
     private void startPhotoRecord() {
+        pendingPhotoOpensNewRecord = true;
+        startPhotoRecord(null, null);
+    }
+
+    private void startPhotoRecord(@Nullable EntryDraft draft, @Nullable Runnable refreshImages) {
         if (cameraLauncher == null) {
             return;
         }
         try {
+            pendingImageDraft = draft;
+            pendingImageRefresh = refreshImages;
             pendingPhotoFile = createPhotoFile();
             Uri photoUri = FileProvider.getUriForFile(
                     requireContext(),
@@ -1338,6 +1974,15 @@ public class FragmentCount extends Fragment {
             clearPendingPhoto();
             Toast.makeText(requireContext(), "无法创建照片文件", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void pickImage(EntryDraft draft, Runnable refreshImages) {
+        if (imagePickerLauncher == null) {
+            return;
+        }
+        pendingImageDraft = draft;
+        pendingImageRefresh = refreshImages;
+        imagePickerLauncher.launch("image/*");
     }
 
     private File createPhotoFile() throws IOException {
@@ -1358,9 +2003,96 @@ public class FragmentCount extends Fragment {
             if (photoFile != null && photoFile.exists()) {
                 photoFile.delete();
             }
+            clearPendingImageTarget();
             return;
         }
-        showEntrySheet(null, photoFile.getAbsolutePath());
+        String imagePath = photoFile.getAbsolutePath();
+        if (pendingPhotoOpensNewRecord || pendingImageDraft == null) {
+            pendingPhotoOpensNewRecord = false;
+            clearPendingImageTarget();
+            showEntrySheet(null, imagePath);
+            return;
+        }
+        pendingImageDraft.imagePaths.add(imagePath);
+        pendingImageDraft.addedImagePaths.add(imagePath);
+        if (pendingImageRefresh != null) {
+            pendingImageRefresh.run();
+        }
+        clearPendingImageTarget();
+    }
+
+    private void handleImagePicked(Uri uri) {
+        if (uri == null || pendingImageDraft == null) {
+            clearPendingImageTarget();
+            return;
+        }
+        try {
+            File imageFile = copyPickedImage(uri);
+            String imagePath = imageFile.getAbsolutePath();
+            pendingImageDraft.imagePaths.add(imagePath);
+            pendingImageDraft.addedImagePaths.add(imagePath);
+            if (pendingImageRefresh != null) {
+                pendingImageRefresh.run();
+            }
+        } catch (IOException e) {
+            Toast.makeText(requireContext(), "无法读取图片", Toast.LENGTH_SHORT).show();
+        } finally {
+            clearPendingImageTarget();
+        }
+    }
+
+    private void handleCustomIconPicked(Uri uri) {
+        if (uri == null || pendingCustomIconGrid == null || pendingCustomIconSelection == null) {
+            clearPendingCustomIconPicker();
+            return;
+        }
+        try {
+            CountCustomIcon icon = pendingReplacingCustomIconId == null
+                    ? repository.importCustomIcon(uri)
+                    : repository.replaceCustomIcon(pendingReplacingCustomIconId, uri);
+            pendingCustomIconSelection[0] = icon.iconRef();
+            if (pendingBuiltinIconGrid != null) {
+                renderInlineCategoryIconGrid(pendingBuiltinIconGrid, pendingCustomIconSelection);
+            }
+            renderInlineCustomIconGrid(
+                    pendingCustomIconGrid,
+                    pendingBuiltinIconGrid,
+                    pendingCustomIconSelection,
+                    pendingCustomIconType == null ? TYPE_EXPENSE : pendingCustomIconType
+            );
+            refreshMonthView();
+            Toast.makeText(requireContext(), pendingReplacingCustomIconId == null ? "图标已导入" : "图标已替换", Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            Toast.makeText(requireContext(), "无法导入图标，请选择 PNG/WebP/JPG 图片", Toast.LENGTH_SHORT).show();
+        } finally {
+            clearPendingCustomIconPicker();
+        }
+    }
+
+    private void clearPendingCustomIconPicker() {
+        pendingCustomIconGrid = null;
+        pendingBuiltinIconGrid = null;
+        pendingCustomIconSelection = null;
+        pendingReplacingCustomIconId = null;
+        pendingCustomIconType = null;
+    }
+
+    private File copyPickedImage(Uri uri) throws IOException {
+        File target = createPhotoFile();
+        try (
+                InputStream input = requireContext().getContentResolver().openInputStream(uri);
+                OutputStream output = new FileOutputStream(target)
+        ) {
+            if (input == null) {
+                throw new IOException("Cannot open selected image");
+            }
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                output.write(buffer, 0, count);
+            }
+        }
+        return target;
     }
 
     private void clearPendingPhoto() {
@@ -1368,6 +2100,13 @@ public class FragmentCount extends Fragment {
             pendingPhotoFile.delete();
         }
         pendingPhotoFile = null;
+        clearPendingImageTarget();
+    }
+
+    private void clearPendingImageTarget() {
+        pendingImageDraft = null;
+        pendingImageRefresh = null;
+        pendingPhotoOpensNewRecord = false;
     }
 
     private void deleteImageFile(@Nullable String imagePath) {
@@ -1378,6 +2117,20 @@ public class FragmentCount extends Fragment {
         if (imageFile.exists()) {
             imageFile.delete();
         }
+    }
+
+    private void deleteAddedImages(EntryDraft draft) {
+        for (String imagePath : new ArrayList<>(draft.addedImagePaths)) {
+            deleteImageFile(imagePath);
+        }
+        draft.addedImagePaths.clear();
+    }
+
+    private void deleteRemovedImages(EntryDraft draft) {
+        for (String imagePath : new ArrayList<>(draft.removedImagePaths)) {
+            deleteImageFile(imagePath);
+        }
+        draft.removedImagePaths.clear();
     }
 
     private View actionSheetItem(String mark, String title, String subtitle, View.OnClickListener listener) {
@@ -1453,8 +2206,7 @@ public class FragmentCount extends Fragment {
 
     private ImageView plainIcon(String icon, int sizeDp) {
         ImageView image = new ImageView(requireContext());
-        image.setImageResource(CategoryIconMapper.drawableResId(requireContext(), icon));
-        image.setColorFilter(COLOR_TEXT);
+        CategoryIconMapper.loadInto(image, icon, repository, COLOR_TEXT);
         image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         image.setMinimumWidth(dp(sizeDp));
         image.setMinimumHeight(dp(sizeDp));

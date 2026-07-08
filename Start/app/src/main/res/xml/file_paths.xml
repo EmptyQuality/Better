@@ -3,4 +3,7 @@
     <external-files-path
         name="count_images"
         path="Pictures/" />
+    <files-path
+        name="count_images_internal"
+        path="Pictures/" />
 </paths>

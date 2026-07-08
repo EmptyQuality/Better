@@ -4,7 +4,15 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -12,15 +20,22 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 public class CountRepository {
+    private static final String CUSTOM_ICON_DIR = "category_icons";
+    private static final String CUSTOM_ICON_SOURCE_SINGLE = "single";
+    private static final long MAX_CUSTOM_ICON_BYTES = 2 * 1024 * 1024;
+
+    private final Context appContext;
     private final CountDatabaseHelper helper;
     private final ZoneId zoneId = ZoneId.systemDefault();
     private static final DateTimeFormatter POINT_DAY_FORMATTER =
             DateTimeFormatter.ofPattern("MM-dd", Locale.CHINA);
 
     public CountRepository(Context context) {
-        helper = new CountDatabaseHelper(context.getApplicationContext());
+        appContext = context.getApplicationContext();
+        helper = new CountDatabaseHelper(appContext);
     }
 
     public List<CountCategory> getCategories(String type) {
@@ -128,10 +143,18 @@ public class CountRepository {
     }
 
     public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note) {
-        return addTransaction(type, amount, categoryId, date, note, null);
+        return addTransaction(type, amount, categoryId, date, note, (String) null);
     }
 
     public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note, String imagePath) {
+        List<String> imagePaths = new ArrayList<>();
+        if (imagePath != null && !imagePath.trim().isEmpty()) {
+            imagePaths.add(imagePath);
+        }
+        return addTransaction(type, amount, categoryId, date, note, imagePaths);
+    }
+
+    public long addTransaction(String type, double amount, long categoryId, LocalDate date, String note, List<String> imagePaths) {
         SQLiteDatabase db = helper.getWritableDatabase();
         long now = System.currentTimeMillis();
         ContentValues values = new ContentValues();
@@ -140,13 +163,21 @@ public class CountRepository {
         values.put("category_id", categoryId);
         values.put("happened_at", toMillis(date));
         values.put("note", note);
-        values.put("image_path", imagePath);
+        values.put("image_path", firstImagePath(imagePaths));
         values.put("created_at", now);
         values.put("updated_at", now);
-        return db.insert(CountDatabaseHelper.TABLE_TRANSACTIONS, null, values);
+        long id = db.insert(CountDatabaseHelper.TABLE_TRANSACTIONS, null, values);
+        if (id != -1) {
+            replaceTransactionImages(db, id, imagePaths);
+        }
+        return id;
     }
 
     public void updateTransaction(long id, String type, double amount, long categoryId, LocalDate date, String note) {
+        updateTransaction(id, type, amount, categoryId, date, note, getTransactionImagePaths(id));
+    }
+
+    public void updateTransaction(long id, String type, double amount, long categoryId, LocalDate date, String note, List<String> imagePaths) {
         SQLiteDatabase db = helper.getWritableDatabase();
         ContentValues values = new ContentValues();
         values.put("type", type);
@@ -154,6 +185,7 @@ public class CountRepository {
         values.put("category_id", categoryId);
         values.put("happened_at", toMillis(date));
         values.put("note", note);
+        values.put("image_path", firstImagePath(imagePaths));
         values.put("updated_at", System.currentTimeMillis());
         db.update(
                 CountDatabaseHelper.TABLE_TRANSACTIONS,
@@ -161,6 +193,7 @@ public class CountRepository {
                 "id = ?",
                 new String[]{String.valueOf(id)}
         );
+        replaceTransactionImages(db, id, imagePaths);
     }
 
     public int importTransactions(List<CountImportRecord> records) {
@@ -208,6 +241,33 @@ public class CountRepository {
                 "id = ?",
                 new String[]{String.valueOf(id)}
         );
+    }
+
+    public List<CountImage> getTransactionImages(long transactionId) {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        List<CountImage> images = new ArrayList<>();
+        String sql = "SELECT id, transaction_id, image_path, sort_order FROM " +
+                CountDatabaseHelper.TABLE_TRANSACTION_IMAGES +
+                " WHERE transaction_id = ? ORDER BY sort_order, id";
+        try (Cursor cursor = db.rawQuery(sql, new String[]{String.valueOf(transactionId)})) {
+            while (cursor.moveToNext()) {
+                images.add(new CountImage(
+                        cursor.getLong(0),
+                        cursor.getLong(1),
+                        cursor.getString(2),
+                        cursor.getInt(3)
+                ));
+            }
+        }
+        return images;
+    }
+
+    public List<String> getTransactionImagePaths(long transactionId) {
+        List<String> paths = new ArrayList<>();
+        for (CountImage image : getTransactionImages(transactionId)) {
+            paths.add(image.imagePath);
+        }
+        return paths;
     }
 
     public CountStats getStats(LocalDate start, LocalDate end) {
@@ -336,6 +396,144 @@ public class CountRepository {
         return null;
     }
 
+    public List<CountCustomIcon> getCustomIcons() {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        List<CountCustomIcon> icons = new ArrayList<>();
+        String sql = "SELECT id, label, file_name, source, pack_id FROM " +
+                CountDatabaseHelper.TABLE_CUSTOM_ICONS +
+                " ORDER BY created_at DESC, label";
+        try (Cursor cursor = db.rawQuery(sql, null)) {
+            while (cursor.moveToNext()) {
+                icons.add(readCustomIcon(cursor));
+            }
+        }
+        return icons;
+    }
+
+    public CountCustomIcon getCustomIcon(String id) {
+        if (id == null || id.trim().isEmpty()) {
+            return null;
+        }
+        SQLiteDatabase db = helper.getReadableDatabase();
+        String sql = "SELECT id, label, file_name, source, pack_id FROM " +
+                CountDatabaseHelper.TABLE_CUSTOM_ICONS +
+                " WHERE id = ? LIMIT 1";
+        try (Cursor cursor = db.rawQuery(sql, new String[]{id})) {
+            if (cursor.moveToFirst()) {
+                return readCustomIcon(cursor);
+            }
+        }
+        return null;
+    }
+
+    public CountCustomIcon importCustomIcon(Uri uri) throws IOException {
+        if (uri == null) {
+            throw new IOException("Icon uri is empty");
+        }
+        byte[] bytes;
+        try (InputStream input = appContext.getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Cannot open selected icon");
+            }
+            bytes = readLimitedBytes(input, MAX_CUSTOM_ICON_BYTES);
+        }
+        if (BitmapFactory.decodeByteArray(bytes, 0, bytes.length) == null) {
+            throw new IOException("Selected file is not a supported image");
+        }
+
+        String id = "icon_" + UUID.randomUUID().toString().replace("-", "");
+        String displayName = readDisplayName(uri);
+        String extension = extensionFromName(displayName);
+        if (extension.isEmpty()) {
+            extension = ".png";
+        }
+        String fileName = id + extension;
+        File target = customIconFile(fileName);
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("Cannot create icon directory");
+        }
+        try (FileOutputStream output = new FileOutputStream(target)) {
+            output.write(bytes);
+        }
+
+        String label = labelFromDisplayName(displayName);
+        SQLiteDatabase db = helper.getWritableDatabase();
+        long now = System.currentTimeMillis();
+        ContentValues values = new ContentValues();
+        values.put("id", id);
+        values.put("label", label.isEmpty() ? "自定义图标" : label);
+        values.put("file_name", fileName);
+        values.put("source", CUSTOM_ICON_SOURCE_SINGLE);
+        values.putNull("pack_id");
+        values.put("created_at", now);
+        db.insert(CountDatabaseHelper.TABLE_CUSTOM_ICONS, null, values);
+        return new CountCustomIcon(id, label, fileName, CUSTOM_ICON_SOURCE_SINGLE, null);
+    }
+
+    public File customIconFile(String fileName) {
+        return new File(new File(appContext.getFilesDir(), CUSTOM_ICON_DIR), fileName);
+    }
+
+    public CountCustomIcon replaceCustomIcon(String id, Uri uri) throws IOException {
+        CountCustomIcon existing = getCustomIcon(id);
+        if (existing == null) {
+            throw new IOException("Custom icon does not exist");
+        }
+        ImportedIconFile iconFile = copyCustomIconFile(id, uri);
+        SQLiteDatabase db = helper.getWritableDatabase();
+        ContentValues values = new ContentValues();
+        values.put("label", iconFile.label.isEmpty() ? existing.label : iconFile.label);
+        values.put("file_name", iconFile.fileName);
+        db.update(
+                CountDatabaseHelper.TABLE_CUSTOM_ICONS,
+                values,
+                "id = ?",
+                new String[]{id}
+        );
+        if (existing.fileName != null && !existing.fileName.equals(iconFile.fileName)) {
+            deleteFileQuietly(customIconFile(existing.fileName));
+        }
+        return getCustomIcon(id);
+    }
+
+    public void deleteCustomIcon(String id) {
+        CountCustomIcon existing = getCustomIcon(id);
+        if (existing == null) {
+            return;
+        }
+        SQLiteDatabase db = helper.getWritableDatabase();
+        String iconRef = CategoryIconMapper.CUSTOM_PREFIX + id;
+        long now = System.currentTimeMillis();
+
+        ContentValues expenseValues = new ContentValues();
+        expenseValues.put("icon", CategoryIconMapper.DEFAULT_EXPENSE_ICON);
+        expenseValues.put("updated_at", now);
+        db.update(
+                CountDatabaseHelper.TABLE_CATEGORIES,
+                expenseValues,
+                "icon = ? AND type = ?",
+                new String[]{iconRef, "expense"}
+        );
+
+        ContentValues incomeValues = new ContentValues();
+        incomeValues.put("icon", CategoryIconMapper.DEFAULT_INCOME_ICON);
+        incomeValues.put("updated_at", now);
+        db.update(
+                CountDatabaseHelper.TABLE_CATEGORIES,
+                incomeValues,
+                "icon = ? AND type = ?",
+                new String[]{iconRef, "income"}
+        );
+
+        db.delete(
+                CountDatabaseHelper.TABLE_CUSTOM_ICONS,
+                "id = ?",
+                new String[]{id}
+        );
+        deleteFileQuietly(customIconFile(existing.fileName));
+    }
+
     public List<CountSeriesPoint> getExpenseTrendByDay(LocalDate start, LocalDate end) {
         List<CountSeriesPoint> points = new ArrayList<>();
         LocalDate day = start;
@@ -373,9 +571,25 @@ public class CountRepository {
         );
     }
 
+    private CountCustomIcon readCustomIcon(Cursor cursor) {
+        return new CountCustomIcon(
+                cursor.getString(0),
+                cursor.getString(1),
+                cursor.getString(2),
+                cursor.getString(3),
+                cursor.getString(4)
+        );
+    }
+
     private CountTransaction readTransaction(Cursor cursor) {
+        long id = cursor.getLong(0);
+        List<String> imagePaths = getTransactionImagePaths(id);
+        String legacyImagePath = cursor.getString(9);
+        if (imagePaths.isEmpty() && legacyImagePath != null && !legacyImagePath.trim().isEmpty()) {
+            imagePaths.add(legacyImagePath);
+        }
         return new CountTransaction(
-                cursor.getLong(0),
+                id,
                 cursor.getString(1),
                 cursor.getDouble(2),
                 cursor.getLong(3),
@@ -384,8 +598,44 @@ public class CountRepository {
                 cursor.getString(6),
                 fromMillis(cursor.getLong(7)),
                 cursor.getString(8),
-                cursor.getString(9)
+                imagePaths
         );
+    }
+
+    private String firstImagePath(List<String> imagePaths) {
+        if (imagePaths == null) {
+            return null;
+        }
+        for (String path : imagePaths) {
+            if (path != null && !path.trim().isEmpty()) {
+                return path;
+            }
+        }
+        return null;
+    }
+
+    private void replaceTransactionImages(SQLiteDatabase db, long transactionId, List<String> imagePaths) {
+        db.delete(
+                CountDatabaseHelper.TABLE_TRANSACTION_IMAGES,
+                "transaction_id = ?",
+                new String[]{String.valueOf(transactionId)}
+        );
+        if (imagePaths == null || imagePaths.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        int sort = 0;
+        for (String path : imagePaths) {
+            if (path == null || path.trim().isEmpty()) {
+                continue;
+            }
+            ContentValues values = new ContentValues();
+            values.put("transaction_id", transactionId);
+            values.put("image_path", path);
+            values.put("sort_order", sort++);
+            values.put("created_at", now);
+            db.insert(CountDatabaseHelper.TABLE_TRANSACTION_IMAGES, null, values);
+        }
     }
 
     private long toMillis(LocalDate date) {
@@ -394,6 +644,113 @@ public class CountRepository {
 
     private LocalDate fromMillis(long millis) {
         return Instant.ofEpochMilli(millis).atZone(zoneId).toLocalDate();
+    }
+
+    private ImportedIconFile copyCustomIconFile(String id, Uri uri) throws IOException {
+        byte[] bytes;
+        try (InputStream input = appContext.getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Cannot open selected icon");
+            }
+            bytes = readLimitedBytes(input, MAX_CUSTOM_ICON_BYTES);
+        }
+        if (BitmapFactory.decodeByteArray(bytes, 0, bytes.length) == null) {
+            throw new IOException("Selected file is not a supported image");
+        }
+        String displayName = readDisplayName(uri);
+        String extension = extensionFromName(displayName);
+        if (extension.isEmpty()) {
+            extension = ".png";
+        }
+        String fileName = id + "_" + System.currentTimeMillis() + extension;
+        File target = customIconFile(fileName);
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("Cannot create icon directory");
+        }
+        try (FileOutputStream output = new FileOutputStream(target)) {
+            output.write(bytes);
+        }
+        return new ImportedIconFile(fileName, labelFromDisplayName(displayName));
+    }
+
+    private byte[] readLimitedBytes(InputStream input, long maxBytes) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        long total = 0;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) {
+                throw new IOException("Icon file is too large");
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private String readDisplayName(Uri uri) {
+        try (Cursor cursor = appContext.getContentResolver().query(
+                uri,
+                new String[]{OpenableColumns.DISPLAY_NAME},
+                null,
+                null,
+                null
+        )) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (index >= 0) {
+                    return cursor.getString(index);
+                }
+            }
+        }
+        String fallback = uri.getLastPathSegment();
+        return fallback == null ? "" : fallback;
+    }
+
+    private String extensionFromName(String name) {
+        if (name == null) {
+            return "";
+        }
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot >= name.length() - 1) {
+            return "";
+        }
+        String extension = name.substring(dot).toLowerCase(Locale.ROOT);
+        if (".png".equals(extension) || ".webp".equals(extension) || ".jpg".equals(extension)
+                || ".jpeg".equals(extension)) {
+            return extension;
+        }
+        return "";
+    }
+
+    private String labelFromDisplayName(String name) {
+        if (name == null) {
+            return "";
+        }
+        int slash = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        String label = slash >= 0 ? name.substring(slash + 1) : name;
+        int dot = label.lastIndexOf('.');
+        if (dot > 0) {
+            label = label.substring(0, dot);
+        }
+        return label.trim();
+    }
+
+    private void deleteFileQuietly(File file) {
+        if (file != null && file.exists()) {
+            file.delete();
+        }
+    }
+
+    private static class ImportedIconFile {
+        final String fileName;
+        final String label;
+
+        ImportedIconFile(String fileName, String label) {
+            this.fileName = fileName;
+            this.label = label;
+        }
     }
 
     private int nextSortOrder(SQLiteDatabase db, String type, Long parentId) {
