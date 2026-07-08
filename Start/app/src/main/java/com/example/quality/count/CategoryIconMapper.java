@@ -8,6 +8,8 @@ import java.util.Set;
 
 public final class CategoryIconMapper {
     public static final String DEFAULT_ICON = "list";
+    public static final String DEFAULT_EXPENSE_ICON = "expend";
+    public static final String DEFAULT_INCOME_ICON = "income";
 
     public static final String[] ICON_KEYS = {
             "food",
@@ -41,6 +43,11 @@ public final class CategoryIconMapper {
 
     private static final Set<String> ICON_KEY_SET = new HashSet<>(Arrays.asList(ICON_KEYS));
 
+    static {
+        ICON_KEY_SET.add(DEFAULT_EXPENSE_ICON);
+        ICON_KEY_SET.add(DEFAULT_INCOME_ICON);
+    }
+
     private CategoryIconMapper() {
     }
 
@@ -57,6 +64,16 @@ public final class CategoryIconMapper {
 
     public static int drawableResId(Context context, String iconKey) {
         String normalized = normalize(iconKey);
+        if (DEFAULT_EXPENSE_ICON.equals(normalized) || DEFAULT_INCOME_ICON.equals(normalized)) {
+            int resId = context.getResources().getIdentifier(
+                    "ic_" + normalized,
+                    "drawable",
+                    context.getPackageName()
+            );
+            if (resId != 0) {
+                return resId;
+            }
+        }
         int resId = context.getResources().getIdentifier(
                 "ic_category_" + normalized,
                 "drawable",
@@ -73,40 +90,10 @@ public final class CategoryIconMapper {
     }
 
     public static String suggestedIcon(String name, String type) {
-        if (name == null) {
-            return defaultIcon(type);
-        }
-        switch (name.trim()) {
-            case "餐饮":
-                return "food";
-            case "交通":
-                return "car";
-            case "购物":
-                return "goods";
-            case "医疗":
-                return "medic";
-            case "学习":
-                return "learning";
-            case "水电费":
-                return "bottle";
-            case "服饰":
-                return "cloth";
-            case "数码":
-                return "digital";
-            case "日用":
-                return "tissue";
-            case "书籍":
-                return "book";
-            case "工资":
-                return "salary";
-            case "兼职":
-                return "parttime_job";
-            default:
-                return defaultIcon(type);
-        }
+        return defaultIcon(type);
     }
 
     public static String defaultIcon(String type) {
-        return "income".equals(type) ? "salary" : DEFAULT_ICON;
+        return "income".equals(type) ? DEFAULT_INCOME_ICON : DEFAULT_EXPENSE_ICON;
     }
 }

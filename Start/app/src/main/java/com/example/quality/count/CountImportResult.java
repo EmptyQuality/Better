@@ -11,6 +11,7 @@ public class CountImportResult {
     public int skippedRows;
     public LocalDate latestDate;
     private final List<String> messages = new ArrayList<>();
+    private final List<String> createdCategories = new ArrayList<>();
 
     public void addSkipped(String message) {
         skippedRows++;
@@ -28,5 +29,16 @@ public class CountImportResult {
 
     public List<String> messages() {
         return Collections.unmodifiableList(messages);
+    }
+
+    public void addCreatedCategory(String type, String name) {
+        String label = ("income".equals(type) ? "收入：" : "支出：") + name;
+        if (!createdCategories.contains(label)) {
+            createdCategories.add(label);
+        }
+    }
+
+    public List<String> createdCategories() {
+        return Collections.unmodifiableList(createdCategories);
     }
 }

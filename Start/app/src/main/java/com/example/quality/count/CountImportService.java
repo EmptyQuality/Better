@@ -31,6 +31,8 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class CountImportService {
+    public static final String SOURCE_WECHAT = "wechat";
+    public static final String SOURCE_SHARK = "shark";
     private static final String TYPE_EXPENSE = "expense";
     private static final String TYPE_INCOME = "income";
     private static final LocalDate EXCEL_EPOCH = LocalDate.of(1899, 12, 30);
@@ -51,6 +53,15 @@ public class CountImportService {
             Context context,
             CountRepository repository,
             Uri uri
+    ) throws IOException {
+        return importFromUri(context, repository, uri, "");
+    }
+
+    public static CountImportResult importFromUri(
+            Context context,
+            CountRepository repository,
+            Uri uri,
+            String source
     ) throws IOException {
         CountImportResult result = new CountImportResult();
         String fileName = readDisplayName(context, uri);
@@ -73,9 +84,9 @@ public class CountImportService {
             rows = readCsvRows(bytes);
         }
 
-        List<CountImportRecord> records = parseRows(rows, result);
+        List<CountImportRecord> records = parseRows(rows, result, source);
         if (!records.isEmpty()) {
-            result.insertedRows = repository.importTransactions(records);
+            result.insertedRows = repository.importTransactions(records, result);
             for (CountImportRecord record : records) {
                 if (result.latestDate == null || record.date.isAfter(result.latestDate)) {
                     result.latestDate = record.date;
@@ -364,7 +375,8 @@ public class CountImportService {
 
     private static List<CountImportRecord> parseRows(
             List<List<String>> rows,
-            CountImportResult result
+            CountImportResult result,
+            String source
     ) {
         List<CountImportRecord> records = new ArrayList<>();
         int firstDataRow = firstNonEmptyRow(rows);
@@ -373,10 +385,10 @@ public class CountImportService {
         }
 
         Columns columns;
-        boolean hasHeader = looksLikeHeader(rows.get(firstDataRow));
-        if (hasHeader) {
-            columns = columnsFromHeader(rows.get(firstDataRow));
-            firstDataRow++;
+        int headerRow = findHeaderRow(rows, firstDataRow, source);
+        if (headerRow >= 0) {
+            columns = columnsFromHeader(rows.get(headerRow));
+            firstDataRow = headerRow + 1;
         } else {
             columns = Columns.defaultOrder();
         }
@@ -425,6 +437,10 @@ public class CountImportService {
                 return null;
             }
             type = parseType(cell(row, columns.type), rawAmount);
+            if (type == null) {
+                result.addSkipped("第 " + rowNumber + " 行：收/支无法识别");
+                return null;
+            }
             amount = Math.abs(rawAmount);
         } else {
             Double expense = parseAmount(cell(row, columns.expenseAmount));
@@ -442,8 +458,17 @@ public class CountImportService {
         }
 
         String category = cell(row, columns.category).trim();
-        String note = cell(row, columns.note).trim();
+        String note = buildImportNote(row, columns);
         return new CountImportRecord(type, amount, category, date, note);
+    }
+
+    private static int findHeaderRow(List<List<String>> rows, int startRow, String source) {
+        for (int i = startRow; i < rows.size(); i++) {
+            if (looksLikeHeader(rows.get(i), source)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static int firstNonEmptyRow(List<List<String>> rows) {
@@ -455,7 +480,13 @@ public class CountImportService {
         return -1;
     }
 
-    private static boolean looksLikeHeader(List<String> row) {
+    private static boolean looksLikeHeader(List<String> row, String source) {
+        if (SOURCE_WECHAT.equals(source)) {
+            return containsHeaders(row, "交易时间", "收支", "金额元");
+        }
+        if (SOURCE_SHARK.equals(source)) {
+            return containsHeaders(row, "日期", "收支类型", "金额");
+        }
         for (String cell : row) {
             String header = normalizeHeader(cell);
             if (isDateHeader(header) || isTypeHeader(header) || isAmountHeader(header)
@@ -465,6 +496,19 @@ public class CountImportService {
             }
         }
         return false;
+    }
+
+    private static boolean containsHeaders(List<String> row, String first, String second, String third) {
+        boolean hasFirst = false;
+        boolean hasSecond = false;
+        boolean hasThird = false;
+        for (String cell : row) {
+            String header = normalizeHeader(cell);
+            hasFirst = hasFirst || first.equals(header);
+            hasSecond = hasSecond || second.equals(header);
+            hasThird = hasThird || third.equals(header);
+        }
+        return hasFirst && hasSecond && hasThird;
     }
 
     private static Columns columnsFromHeader(List<String> row) {
@@ -481,6 +525,12 @@ public class CountImportService {
                 columns.category = i;
             } else if (columns.note < 0 && isNoteHeader(header)) {
                 columns.note = i;
+            } else if (columns.account < 0 && isAccountHeader(header)) {
+                columns.account = i;
+            } else if (columns.counterparty < 0 && isCounterpartyHeader(header)) {
+                columns.counterparty = i;
+            } else if (columns.product < 0 && isProductHeader(header)) {
+                columns.product = i;
             } else if (columns.incomeAmount < 0 && isIncomeAmountHeader(header)) {
                 columns.incomeAmount = i;
             } else if (columns.expenseAmount < 0 && isExpenseAmountHeader(header)) {
@@ -488,6 +538,26 @@ public class CountImportService {
             }
         }
         return columns;
+    }
+
+    private static String buildImportNote(List<String> row, Columns columns) {
+        StringBuilder builder = new StringBuilder();
+        appendNotePart(builder, "交易对方", cell(row, columns.counterparty));
+        appendNotePart(builder, "商品", cell(row, columns.product));
+        appendNotePart(builder, "账户", cell(row, columns.account));
+        appendNotePart(builder, "备注", cell(row, columns.note));
+        return builder.toString();
+    }
+
+    private static void appendNotePart(StringBuilder builder, String label, String value) {
+        String text = valueOrEmpty(value).trim();
+        if (text.isEmpty() || "/".equals(text)) {
+            return;
+        }
+        if (builder.length() > 0) {
+            builder.append("；");
+        }
+        builder.append(label).append("：").append(text);
     }
 
     private static LocalDate parseDate(String value) {
@@ -555,6 +625,9 @@ public class CountImportService {
 
     private static String parseType(String value, double rawAmount) {
         String text = normalizeHeader(value);
+        if (text.contains("中性")) {
+            return null;
+        }
         if (text.contains("收入") || text.equals("收") || text.equals("income")
                 || text.equals("in") || text.equals("+") || text.equals("入账")) {
             return TYPE_INCOME;
@@ -563,17 +636,21 @@ public class CountImportService {
                 || text.equals("out") || text.equals("-") || text.equals("出账")) {
             return TYPE_EXPENSE;
         }
-        return rawAmount < 0 ? TYPE_EXPENSE : TYPE_EXPENSE;
+        if (text.isEmpty()) {
+            return rawAmount < 0 ? TYPE_EXPENSE : null;
+        }
+        return rawAmount < 0 ? TYPE_EXPENSE : null;
     }
 
     private static boolean isDateHeader(String header) {
         return header.equals("日期") || header.equals("时间") || header.equals("记账日期")
-                || header.equals("账单日期") || header.equals("date") || header.equals("day")
+                || header.equals("账单日期") || header.equals("交易时间")
+                || header.equals("date") || header.equals("day")
                 || header.equals("happenedat");
     }
 
     private static boolean isTypeHeader(String header) {
-        return header.equals("类型") || header.equals("收支") || header.equals("方向")
+        return header.equals("类型") || header.equals("收支") || header.equals("收支类型") || header.equals("方向")
                 || header.equals("type");
     }
 
@@ -594,7 +671,7 @@ public class CountImportService {
 
     private static boolean isCategoryHeader(String header) {
         return header.equals("分类") || header.equals("类别") || header.equals("category")
-                || header.equals("账目分类");
+                || header.equals("账目分类") || header.equals("交易类型");
     }
 
     private static boolean isNoteHeader(String header) {
@@ -603,11 +680,26 @@ public class CountImportService {
                 || header.equals("name") || header.equals("description");
     }
 
+    private static boolean isAccountHeader(String header) {
+        return header.equals("账户") || header.equals("账号") || header.equals("account");
+    }
+
+    private static boolean isCounterpartyHeader(String header) {
+        return header.equals("交易对方") || header.equals("对方") || header.equals("商户")
+                || header.equals("merchant") || header.equals("counterparty");
+    }
+
+    private static boolean isProductHeader(String header) {
+        return header.equals("商品") || header.equals("商品名称") || header.equals("项目")
+                || header.equals("product") || header.equals("item");
+    }
+
     private static String normalizeHeader(String value) {
         return valueOrEmpty(value).toLowerCase(Locale.ROOT)
                 .replace(" ", "")
                 .replace("_", "")
                 .replace("-", "")
+                .replace("/", "")
                 .replace("：", "")
                 .replace(":", "")
                 .replace("（", "")
@@ -676,6 +768,9 @@ public class CountImportService {
         int expenseAmount = -1;
         int category = -1;
         int note = -1;
+        int account = -1;
+        int counterparty = -1;
+        int product = -1;
 
         static Columns defaultOrder() {
             Columns columns = new Columns();

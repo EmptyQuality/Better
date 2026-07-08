@@ -1,47 +1,25 @@
 package com.example.quality;
 
 import android.os.Bundle;
-import android.view.MenuItem;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.example.quality.fragment.FragmentHome;
-import com.example.quality.fragment.FragmentMore;
+import com.example.quality.fragment.FragmentCount;
 import com.example.quality.util.LogUtil;
-import com.google.android.material.bottomnavigation.BottomNavigationView;
-import com.google.android.material.navigation.NavigationBarView;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
-
-    BottomNavigationView bottomNavigationView;
-    FragmentHome HomeFragment = new FragmentHome();
-    FragmentMore MoreFragment = new FragmentMore();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         LogUtil.d(TAG, "onCreate");
         setContentView(R.layout.activity_main);
-        bottomNavigationView = findViewById(R.id.bottom_navigation);
-        getSupportFragmentManager().beginTransaction()
-                .replace(R.id.container, HomeFragment).commit();
-
-        bottomNavigationView.setOnItemSelectedListener(new NavigationBarView.OnItemSelectedListener() {
-            @Override
-            public boolean onNavigationItemSelected(MenuItem item) {
-                if (item.getItemId() == R.id.house) {
-                    getSupportFragmentManager().beginTransaction()
-                            .replace(R.id.container, HomeFragment).commit();
-                    return true;
-                } else if (item.getItemId() == R.id.more) {
-                    getSupportFragmentManager().beginTransaction()
-                            .replace(R.id.container, MoreFragment).commit();
-                    return true;
-                }
-                return false;
-            }
-        });
+        if (savedInstanceState == null) {
+            getSupportFragmentManager().beginTransaction()
+                    .replace(R.id.container, new FragmentCount())
+                    .commit();
+        }
     }
 
     @Override

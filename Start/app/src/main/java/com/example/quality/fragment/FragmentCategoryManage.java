@@ -30,7 +30,12 @@ public class FragmentCategoryManage extends Fragment {
     private static final String TYPE_EXPENSE = "expense";
     private static final String TYPE_INCOME = "income";
     private static final int COLOR_BEE = 0xFFF8C91C;
-    private static final int COLOR_TEXT = 0xFF111827;
+    private static final int COLOR_BEE_SOFT = 0xFFFFF4BF;
+    private static final int COLOR_BACKGROUND = 0xFFFFFBF4;
+    private static final int COLOR_SURFACE = 0xFFFFFFFF;
+    private static final int COLOR_SURFACE_SOFT = 0xFFFFF8E8;
+    private static final int COLOR_LINE = 0xFFEDE3CF;
+    private static final int COLOR_TEXT = 0xFF2F2D2D;
     private static final int COLOR_MUTED = 0xFF6B7280;
 
     private CountRepository repository;
@@ -62,13 +67,13 @@ public class FragmentCategoryManage extends Fragment {
 
     private View buildContentView() {
         LinearLayout page = vertical();
-        page.setBackgroundColor(0xFFFAFAFA);
+        page.setBackgroundColor(COLOR_BACKGROUND);
 
         page.addView(buildHeader());
 
         ScrollView scrollView = new ScrollView(requireContext());
         LinearLayout content = vertical();
-        content.setPadding(dp(16), dp(14), dp(16), dp(96));
+        content.setPadding(dp(18), dp(16), dp(18), dp(96));
         scrollView.addView(content);
         page.addView(scrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -79,14 +84,16 @@ public class FragmentCategoryManage extends Fragment {
         TextView tabsTitle = text("类别类型", 14, COLOR_MUTED, false);
         content.addView(tabsTitle);
         LinearLayout tabs = horizontal();
-        tabs.setPadding(0, dp(8), 0, dp(16));
+        tabs.setPadding(dp(4), dp(4), dp(4), dp(4));
+        tabs.setBackground(round(0xFFF3F0EA, dp(16)));
         expenseTab = tab("支出", TYPE_EXPENSE);
         incomeTab = tab("收入", TYPE_INCOME);
-        tabs.addView(expenseTab, new LinearLayout.LayoutParams(0, dp(42), 1));
+        tabs.addView(expenseTab, new LinearLayout.LayoutParams(0, dp(40), 1));
         LinearLayout.LayoutParams incomeParams = new LinearLayout.LayoutParams(0, dp(42), 1);
-        incomeParams.setMargins(dp(10), 0, 0, 0);
         tabs.addView(incomeTab, incomeParams);
-        content.addView(tabs);
+        LinearLayout.LayoutParams tabsParams = matchWrap();
+        tabsParams.setMargins(0, dp(8), 0, dp(18));
+        content.addView(tabs, tabsParams);
 
         TextView listTitle = text("已有类别", 16, COLOR_TEXT, true);
         content.addView(listTitle);
@@ -95,38 +102,44 @@ public class FragmentCategoryManage extends Fragment {
         listParams.setMargins(0, dp(10), 0, dp(18));
         content.addView(categoryList, listParams);
 
+        LinearLayout addCard = vertical();
+        addCard.setPadding(dp(16), dp(14), dp(16), dp(16));
+        addCard.setBackground(round(COLOR_SURFACE, dp(20)));
+        addCard.setElevation(dp(2));
+
         TextView addTitle = text("新增类别", 16, COLOR_TEXT, true);
-        content.addView(addTitle);
+        addCard.addView(addTitle);
 
         nameInput = new EditText(requireContext());
         nameInput.setHint("输入类别名称");
         nameInput.setSingleLine(true);
         nameInput.setTextColor(COLOR_TEXT);
         nameInput.setHintTextColor(0xFF9CA3AF);
-        nameInput.setBackground(roundStroke(0xFFFFFFFF, dp(10), 0xFFE5E7EB, 1));
-        nameInput.setPadding(dp(12), 0, dp(12), 0);
+        nameInput.setBackground(roundStroke(COLOR_SURFACE_SOFT, dp(14), COLOR_LINE, 1));
+        nameInput.setPadding(dp(14), 0, dp(14), 0);
         LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
+                dp(50)
         );
         inputParams.setMargins(0, dp(10), 0, dp(16));
-        content.addView(nameInput, inputParams);
+        addCard.addView(nameInput, inputParams);
 
         TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
-        content.addView(iconTitle);
+        addCard.addView(iconTitle);
         iconGrid = vertical();
         LinearLayout.LayoutParams gridParams = matchWrap();
         gridParams.setMargins(0, dp(10), 0, dp(18));
-        content.addView(iconGrid, gridParams);
+        addCard.addView(iconGrid, gridParams);
 
         TextView save = text("保存类别", 16, COLOR_TEXT, true);
         save.setGravity(Gravity.CENTER);
-        save.setBackground(round(COLOR_BEE, dp(12)));
+        save.setBackground(round(COLOR_BEE, dp(16)));
         save.setOnClickListener(v -> saveCategory());
-        content.addView(save, new LinearLayout.LayoutParams(
+        addCard.addView(save, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(48)
+                dp(50)
         ));
+        content.addView(addCard, matchWrap());
 
         return page;
     }
@@ -134,19 +147,20 @@ public class FragmentCategoryManage extends Fragment {
     private View buildHeader() {
         LinearLayout header = horizontal();
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(10), dp(8), dp(16), dp(8));
+        header.setPadding(dp(14), dp(10), dp(18), dp(12));
         header.setBackgroundColor(COLOR_BEE);
-
-        TextView back = text("<", 24, COLOR_TEXT, true);
-        back.setGravity(Gravity.CENTER);
-        back.setOnClickListener(v -> requireActivity().getSupportFragmentManager().popBackStack());
-        header.addView(back, fixed(dp(44), dp(44)));
 
         TextView title = text("类别管理", 20, COLOR_TEXT, true);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        titleParams.setMargins(dp(4), 0, 0, 0);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(0, dp(38), 1);
+        titleParams.setMargins(dp(4), 0, dp(10), 0);
         header.addView(title, titleParams);
+
+        TextView back = text("‹", 28, COLOR_TEXT, true);
+        back.setGravity(Gravity.CENTER);
+        back.setBackground(round(0x33FFFFFF, dp(18)));
+        back.setOnClickListener(v -> requireActivity().getSupportFragmentManager().popBackStack());
+        header.addView(back, fixed(dp(38), dp(38)));
         return header;
     }
 
@@ -173,7 +187,7 @@ public class FragmentCategoryManage extends Fragment {
 
     private void styleTab(TextView tab, boolean selected) {
         tab.setTextColor(COLOR_TEXT);
-        tab.setBackground(round(selected ? COLOR_BEE : 0xFFFFFFFF, dp(12)));
+        tab.setBackground(round(selected ? COLOR_BEE : 0x00000000, dp(12)));
     }
 
     private void renderCategories() {
@@ -211,7 +225,8 @@ public class FragmentCategoryManage extends Fragment {
     private View categoryCell(CountCategory category) {
         LinearLayout cell = vertical();
         cell.setGravity(Gravity.CENTER);
-        cell.setBackground(roundStroke(0xFFFFFFFF, dp(12), 0xFFE5E7EB, 1));
+        cell.setBackground(roundStroke(COLOR_SURFACE, dp(16), COLOR_LINE, 1));
+        cell.setElevation(dp(1));
         cell.addView(iconView(category.icon, 24), fixed(dp(42), dp(42)));
         TextView name = text(category.name, 12, COLOR_TEXT, false);
         name.setGravity(Gravity.CENTER);
@@ -248,9 +263,9 @@ public class FragmentCategoryManage extends Fragment {
         FrameLayout box = new FrameLayout(requireContext());
         boolean selected = iconKey.equals(selectedIcon);
         box.setBackground(roundStroke(
-                selected ? 0xFFFFF7D1 : 0xFFFFFFFF,
-                dp(12),
-                selected ? COLOR_BEE : 0xFFE5E7EB,
+                selected ? COLOR_BEE_SOFT : COLOR_SURFACE_SOFT,
+                dp(14),
+                selected ? COLOR_BEE : COLOR_LINE,
                 selected ? 2 : 1
         ));
         ImageView icon = new ImageView(requireContext());
@@ -271,7 +286,7 @@ public class FragmentCategoryManage extends Fragment {
         image.setImageResource(CategoryIconMapper.drawableResId(requireContext(), iconKey));
         image.setColorFilter(COLOR_TEXT);
         image.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        image.setBackground(round(0xFFFFF7D1, dp(24)));
+        image.setBackground(round(COLOR_BEE_SOFT, dp(24)));
         image.setPadding(dp(8), dp(8), dp(8), dp(8));
         image.setMinimumWidth(dp(sizeDp));
         image.setMinimumHeight(dp(sizeDp));

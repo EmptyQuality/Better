@@ -145,6 +145,10 @@ public class CountRepository {
     }
 
     public int importTransactions(List<CountImportRecord> records) {
+        return importTransactions(records, null);
+    }
+
+    public int importTransactions(List<CountImportRecord> records, CountImportResult result) {
         if (records == null || records.isEmpty()) {
             return 0;
         }
@@ -156,7 +160,7 @@ public class CountRepository {
                 if (record == null || record.date == null || record.amount <= 0) {
                     continue;
                 }
-                long categoryId = resolveImportCategoryId(db, record.categoryName, record.type);
+                long categoryId = resolveImportCategoryId(db, record.categoryName, record.type, result);
                 long now = System.currentTimeMillis();
                 ContentValues values = new ContentValues();
                 values.put("type", record.type);
@@ -242,6 +246,32 @@ public class CountRepository {
                 String.valueOf(toMillis(start)),
                 String.valueOf(toMillis(end))
         })) {
+            while (cursor.moveToNext()) {
+                transactions.add(new CountTransaction(
+                        cursor.getLong(0),
+                        cursor.getString(1),
+                        cursor.getDouble(2),
+                        cursor.getLong(3),
+                        cursor.getString(4),
+                        cursor.getString(5),
+                        cursor.getString(6),
+                        fromMillis(cursor.getLong(7)),
+                        cursor.getString(8)
+                ));
+            }
+        }
+        return transactions;
+    }
+
+    public List<CountTransaction> getAllTransactions() {
+        SQLiteDatabase db = helper.getReadableDatabase();
+        List<CountTransaction> transactions = new ArrayList<>();
+        String sql = "SELECT tx.id, tx.type, tx.amount, tx.category_id, category.name, parent.name, category.icon, tx.happened_at, tx.note " +
+                "FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS + " tx " +
+                "JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " category ON tx.category_id = category.id " +
+                "LEFT JOIN " + CountDatabaseHelper.TABLE_CATEGORIES + " parent ON category.parent_id = parent.id " +
+                "ORDER BY tx.happened_at DESC, tx.created_at DESC, tx.id DESC";
+        try (Cursor cursor = db.rawQuery(sql, null)) {
             while (cursor.moveToNext()) {
                 transactions.add(new CountTransaction(
                         cursor.getLong(0),
@@ -359,7 +389,7 @@ public class CountRepository {
         return null;
     }
 
-    private long resolveImportCategoryId(SQLiteDatabase db, String rawName, String type) {
+    private long resolveImportCategoryId(SQLiteDatabase db, String rawName, String type, CountImportResult result) {
         String name = normalizeImportedCategoryName(rawName);
         if (name.isEmpty()) {
             Long defaultId = findDefaultCategoryId(db, type);
@@ -386,13 +416,17 @@ public class CountRepository {
         ContentValues values = new ContentValues();
         values.put("name", name);
         values.put("type", type);
-        values.put("icon", CategoryIconMapper.suggestedIcon(name, type));
+        values.put("icon", CategoryIconMapper.defaultIcon(type));
         values.putNull("parent_id");
         values.put("level", 1);
         values.put("sort_order", nextSortOrder(db, type, null));
         values.put("created_at", now);
         values.put("updated_at", now);
-        return db.insert(CountDatabaseHelper.TABLE_CATEGORIES, null, values);
+        long id = db.insert(CountDatabaseHelper.TABLE_CATEGORIES, null, values);
+        if (id != -1 && result != null) {
+            result.addCreatedCategory(type, name);
+        }
+        return id;
     }
 
     private Long findDefaultCategoryId(SQLiteDatabase db, String type) {

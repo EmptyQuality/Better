@@ -17,22 +17,26 @@
         android:paddingEnd="20dp"
         android:paddingBottom="22dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:text="慢慢来，也可以走很远"
-            android:textColor="#6B7280"
-            android:textSize="14sp" />
-
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="44dp"
+            android:layout_marginBottom="12dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <TextView
-                android:id="@+id/buttonPreviousDay"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="12dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:text="习惯打卡"
+                android:textColor="#111827"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/buttonBackToCount"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
                 android:background="@drawable/bg_icon_button"
@@ -41,32 +45,51 @@
                 android:text="‹"
                 android:textColor="#111827"
                 android:textSize="30sp" />
+        </LinearLayout>
 
-            <TextView
-                android:id="@+id/textSelectedDate"
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="14dp"
+            android:text="慢慢来，也可以走很远"
+            android:textColor="#6B7280"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:id="@+id/dateStripScroll"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="10dp"
+                android:layout_height="match_parent"
                 android:layout_marginEnd="10dp"
                 android:layout_weight="1"
-                android:background="@drawable/bg_date_pill"
-                android:elevation="3dp"
-                android:gravity="center"
-                android:text="2026-07-06 周一"
-                android:textColor="#111827"
-                android:textSize="16sp"
-                android:textStyle="bold" />
+                android:clipToPadding="false"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/dateStrip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
 
             <TextView
-                android:id="@+id/buttonNextDay"
-                android:layout_width="44dp"
+                android:id="@+id/buttonCalendar"
+                android:layout_width="48dp"
                 android:layout_height="44dp"
                 android:background="@drawable/bg_icon_button"
                 android:elevation="3dp"
                 android:gravity="center"
-                android:text="›"
+                android:text="📅"
                 android:textColor="#111827"
-                android:textSize="30sp" />
+                android:textSize="22sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <Button
