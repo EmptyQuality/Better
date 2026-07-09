@@ -44,6 +44,11 @@ public final class CategoryIconMapper {
             BUILTIN_PREFIX + "snack",
             BUILTIN_PREFIX + "team",
             BUILTIN_PREFIX + "trip",
+            BUILTIN_PREFIX + "other_expend",
+            BUILTIN_PREFIX + "other_income",
+            BUILTIN_PREFIX + "school_allowance",
+            BUILTIN_PREFIX + "we_allowance",
+            BUILTIN_PREFIX + "home_allowance",
             BUILTIN_PREFIX + "wash"
     };
 
