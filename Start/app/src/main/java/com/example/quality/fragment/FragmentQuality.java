@@ -22,6 +22,7 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.example.quality.R;
+import com.example.quality.util.AppInsets;
 import com.example.quality.util.LogUtil;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
@@ -104,6 +105,7 @@ public class FragmentQuality extends Fragment {
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
         LogUtil.d(TAG, "onViewCreated");
+        AppInsets.applySystemBarPadding(view, true, true);
         bindViews(view);
         selectedDate = savedInstanceState == null
                 ? LocalDate.now()
@@ -382,8 +384,7 @@ public class FragmentQuality extends Fragment {
         sheet.addView(close, closeParams);
         close.setOnClickListener(v -> dialog.dismiss());
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private View createManagerRow(QualityItem item, BottomSheetDialog dialog) {
@@ -552,7 +553,7 @@ public class FragmentQuality extends Fragment {
         cancelButton.setOnClickListener(v -> dialog.dismiss());
 
         render.run();
-        dialog.setContentView(sheet);
+        AppInsets.setScrollableBottomSheetContent(dialog, sheet);
         return dialog;
     }
 

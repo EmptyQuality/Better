@@ -39,6 +39,7 @@ import com.example.quality.count.CountImportService;
 import com.example.quality.count.CountRepository;
 import com.example.quality.count.CountStats;
 import com.example.quality.count.CountTransaction;
+import com.example.quality.util.AppInsets;
 import com.example.quality.util.LogUtil;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
@@ -86,6 +87,8 @@ public class FragmentCount extends Fragment {
     private static final int COLOR_MUTED = 0xFF6B7280;
     private static final DateTimeFormatter DAY_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.CHINA);
+    private static final DateTimeFormatter GROUP_DAY_FORMATTER =
+            DateTimeFormatter.ofPattern("MM月dd日 EEEE", Locale.ENGLISH);
 
     private CountRepository repository;
     private LocalDate selectedMonth = LocalDate.now().withDayOfMonth(1);
@@ -209,12 +212,15 @@ public class FragmentCount extends Fragment {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        main.addView(buildHeader());
+        View header = buildHeader();
+        AppInsets.applySystemBarPadding(header, true, false);
+        main.addView(header);
 
         ScrollView scrollView = new ScrollView(requireContext());
         scrollView.setFillViewport(false);
         scrollView.setClipToPadding(false);
         scrollView.setPadding(0, 0, 0, dp(92));
+        AppInsets.applySystemBarPadding(scrollView, false, true);
         transactionList = vertical();
         transactionList.setPadding(dp(18), dp(14), dp(18), dp(12));
         scrollView.addView(transactionList);
@@ -224,7 +230,9 @@ public class FragmentCount extends Fragment {
                 1
         ));
 
-        frame.addView(buildFloatingActionButton(), actionButtonParams());
+        View actionButton = buildFloatingActionButton();
+        frame.addView(actionButton, actionButtonParams());
+        AppInsets.applySystemBarMargins(actionButton, false, false, true, true);
         return frame;
     }
 
@@ -309,11 +317,113 @@ public class FragmentCount extends Fragment {
             transactionList.addView(emptyState());
             return;
         }
-        for (CountTransaction tx : transactions) {
+        int index = 0;
+        while (index < transactions.size()) {
+            LocalDate date = transactions.get(index).date;
+            List<CountTransaction> dayTransactions = new ArrayList<>();
+            while (index < transactions.size() && transactions.get(index).date.equals(date)) {
+                dayTransactions.add(transactions.get(index));
+                index++;
+            }
             LinearLayout.LayoutParams params = matchWrap();
-            params.setMargins(0, 0, 0, dp(10));
-            transactionList.addView(transactionRow(tx), params);
+            params.setMargins(0, 0, 0, dp(12));
+            transactionList.addView(transactionGroupCard(date, dayTransactions), params);
         }
+    }
+
+    private View transactionGroupCard(LocalDate date, List<CountTransaction> transactions) {
+        LinearLayout card = vertical();
+        card.setPadding(dp(14), dp(12), dp(14), dp(4));
+        card.setBackground(round(COLOR_SURFACE, dp(18)));
+        card.setElevation(dp(2));
+
+        LinearLayout header = horizontal();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView day = text(date.format(GROUP_DAY_FORMATTER), 15, COLOR_MUTED, false);
+        header.addView(day, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView total = text(daySummary(transactions), 14, COLOR_MUTED, false);
+        total.setGravity(Gravity.END);
+        header.addView(total);
+        card.addView(header);
+
+        for (int i = 0; i < transactions.size(); i++) {
+            card.addView(transactionGroupRow(transactions.get(i)));
+            if (i < transactions.size() - 1) {
+                View divider = new View(requireContext());
+                divider.setBackgroundColor(0x1AE0D6C7);
+                LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(1)
+                );
+                dividerParams.setMargins(dp(50), 0, 0, 0);
+                card.addView(divider, dividerParams);
+            }
+        }
+        return card;
+    }
+
+    private String daySummary(List<CountTransaction> transactions) {
+        double income = 0;
+        double expense = 0;
+        for (CountTransaction tx : transactions) {
+            if (TYPE_INCOME.equals(tx.type)) {
+                income += tx.amount;
+            } else {
+                expense += tx.amount;
+            }
+        }
+        if (income > 0 && expense > 0) {
+            return "收入: " + repository.formatMoney(income)
+                    + "  支出: " + repository.formatMoney(expense);
+        }
+        if (income > 0) {
+            return "收入: " + repository.formatMoney(income);
+        }
+        return "支出: " + repository.formatMoney(expense);
+    }
+
+    private View transactionGroupRow(CountTransaction tx) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(12), 0, dp(12));
+        row.setOnClickListener(v -> showEntrySheet(tx));
+        row.setOnLongClickListener(v -> {
+            confirmDeleteTransaction(tx);
+            return true;
+        });
+
+        row.addView(iconBubble(tx.categoryIcon), fixed(dp(38), dp(38)));
+
+        LinearLayout textBox = vertical();
+        TextView title = text(tx.displayCategoryName(), 15, COLOR_TEXT, true);
+        TextView detail = text(tx.categoryPath(), 11, COLOR_MUTED, false);
+        textBox.addView(title);
+        textBox.addView(detail);
+        LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1
+        );
+        textParams.setMargins(dp(10), 0, dp(8), 0);
+        row.addView(textBox, textParams);
+
+        boolean income = TYPE_INCOME.equals(tx.type);
+        TextView amount = text((income ? "+" : "-") + repository.formatMoney(tx.amount),
+                15, income ? COLOR_GREEN : COLOR_ORANGE, true);
+        amount.setGravity(Gravity.END);
+        row.addView(amount);
+
+        ImageView detailIcon = new ImageView(requireContext());
+        detailIcon.setImageResource(R.drawable.ic_detail);
+        detailIcon.setColorFilter(COLOR_MUTED);
+        detailIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        detailIcon.setPadding(dp(5), dp(5), dp(5), dp(5));
+        detailIcon.setBackground(round(COLOR_BEE_SOFT, dp(12)));
+        detailIcon.setOnClickListener(v -> openTransactionDetail(tx.id));
+        LinearLayout.LayoutParams detailParams = fixed(dp(24), dp(24));
+        detailParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(detailIcon, detailParams);
+        return row;
     }
 
     private View transactionRow(CountTransaction tx) {
@@ -484,6 +594,20 @@ public class FragmentCount extends Fragment {
                 dp(66)
         ));
 
+        ScrollView formScroll = new ScrollView(requireContext());
+        formScroll.setFillViewport(false);
+        formScroll.setClipToPadding(false);
+        LinearLayout form = vertical();
+        formScroll.addView(form, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        sheet.addView(formScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
+
         LinearLayout typeRow = horizontal();
         typeRow.setPadding(dp(4), dp(4), dp(4), dp(4));
         typeRow.setBackground(round(0xFFF3F0EA, dp(16)));
@@ -493,18 +617,18 @@ public class FragmentCount extends Fragment {
         typeRow.addView(incomeButton, new LinearLayout.LayoutParams(0, dp(40), 1));
         LinearLayout.LayoutParams typeParams = matchWrap();
         typeParams.setMargins(0, dp(2), 0, dp(12));
-        sheet.addView(typeRow, typeParams);
+        form.addView(typeRow, typeParams);
 
         LinearLayout categoryRow = buildCategoryAmountRow(categorySelection);
         LinearLayout.LayoutParams categoryParams = matchWrap();
         categoryParams.setMargins(0, 0, 0, dp(10));
-        sheet.addView(categoryRow, categoryParams);
+        form.addView(categoryRow, categoryParams);
 
         TextView dateButton = infoButton("日期", formatSheetDate(draft.date), "›");
         dateButton.setOnClickListener(v -> showDateStepDialog(draft, dateButton));
         LinearLayout.LayoutParams dateParams = matchWrap();
         dateParams.setMargins(0, 0, 0, dp(10));
-        sheet.addView(dateButton, dateParams);
+        form.addView(dateButton, dateParams);
 
         EditText noteInput = new EditText(requireContext());
         noteInput.setHint("添加备注，可不填");
@@ -519,12 +643,12 @@ public class FragmentCount extends Fragment {
         noteInput.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams noteParams = matchWrap();
         noteParams.setMargins(0, 0, 0, dp(2));
-        sheet.addView(noteCard(noteInput), noteParams);
+        form.addView(noteCard(noteInput), noteParams);
 
         LinearLayout photoSection = vertical();
         LinearLayout.LayoutParams photoParams = matchWrap();
         photoParams.setMargins(0, dp(10), 0, 0);
-        sheet.addView(photoSection, photoParams);
+        form.addView(photoSection, photoParams);
         final Runnable[] refreshImages = new Runnable[1];
         refreshImages[0] = () -> renderPhotoAttachmentCard(photoSection, draft, refreshImages[0]);
         refreshImages[0].run();
@@ -551,7 +675,6 @@ public class FragmentCount extends Fragment {
         });
 
         sheet.addView(buildKeypad(dialog, draft, amountDisplay, categorySelection, noteInput));
-        dialog.setContentView(sheet);
         dialog.setOnDismissListener(ignored -> {
             if (!draft.entrySaved) {
                 deleteAddedImages(draft);
@@ -559,7 +682,7 @@ public class FragmentCount extends Fragment {
             pendingImageDraft = null;
             pendingImageRefresh = null;
         });
-        dialog.show();
+        AppInsets.showFittedBottomSheet(dialog, sheet);
     }
 
     private View buildKeypad(
@@ -867,8 +990,7 @@ public class FragmentCount extends Fragment {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Math.min(dp(380), Math.max(dp(120), dp(94) * rowCount))
         ));
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private View categoryPickerCell(
@@ -964,22 +1086,29 @@ public class FragmentCount extends Fragment {
         inputParams.setMargins(0, dp(14), 0, dp(14));
         sheet.addView(nameInput, inputParams);
 
-        TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
-        sheet.addView(iconTitle);
-
+        LinearLayout iconArea = vertical();
+        sheet.addView(iconArea, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
         LinearLayout iconGrid = vertical();
         String[] selectedIcon = {CategoryIconMapper.defaultIcon(selection.type)};
-        LinearLayout.LayoutParams gridParams = matchWrap();
-        gridParams.setMargins(0, dp(10), 0, dp(14));
-        sheet.addView(iconGrid, gridParams);
+        iconArea.addView(inlineIconScrollSection("选择图标", iconGrid), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                2
+        ));
         renderInlineCategoryIconGrid(iconGrid, selectedIcon);
 
-        TextView addIconTitle = text("新增图标", 14, COLOR_MUTED, false);
-        sheet.addView(addIconTitle);
-        LinearLayout.LayoutParams actionsParams = matchWrap();
-        actionsParams.setMargins(0, dp(10), 0, dp(18));
         LinearLayout customIconGrid = vertical();
-        sheet.addView(customIconGrid, actionsParams);
+        LinearLayout.LayoutParams customSectionParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        );
+        customSectionParams.setMargins(0, dp(12), 0, dp(14));
+        iconArea.addView(inlineIconScrollSection("新增图标", customIconGrid), customSectionParams);
         renderInlineCustomIconGrid(customIconGrid, iconGrid, selectedIcon, selection.type);
 
         TextView save = text("保存类别", 16, COLOR_TEXT, true);
@@ -1003,8 +1132,28 @@ public class FragmentCount extends Fragment {
                 dp(50)
         ));
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showFittedBottomSheet(dialog, sheet);
+    }
+
+    private View inlineIconScrollSection(String titleText, LinearLayout grid) {
+        LinearLayout section = vertical();
+        TextView title = text(titleText, 14, COLOR_MUTED, false);
+        section.addView(title);
+
+        ScrollView scrollView = new ScrollView(requireContext());
+        scrollView.setClipToPadding(false);
+        scrollView.setFillViewport(false);
+        grid.setPadding(0, dp(6), 0, dp(4));
+        scrollView.addView(grid, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        section.addView(scrollView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
+        return section;
     }
 
     private void renderInlineCategoryIconGrid(LinearLayout iconGrid, String[] selectedIcon) {
@@ -1169,8 +1318,7 @@ public class FragmentCount extends Fragment {
             refreshMonthView();
             Toast.makeText(requireContext(), "图标已删除", Toast.LENGTH_SHORT).show();
         }));
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private void launchCustomIconPicker(
@@ -1330,8 +1478,7 @@ public class FragmentCount extends Fragment {
             startExport(EXPORT_QUALITY);
         }));
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private void showImportSourceSheet() {
@@ -1353,8 +1500,7 @@ public class FragmentCount extends Fragment {
             openImportPicker(CountImportService.SOURCE_SHARK);
         }));
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private void openImportPicker(String source) {
@@ -1868,8 +2014,7 @@ public class FragmentCount extends Fragment {
             dialog.dismiss();
             pickImage(draft, refreshImages);
         }));
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private void showImageViewer(String imagePath) {
@@ -1963,8 +2108,7 @@ public class FragmentCount extends Fragment {
             openQualityFragment();
         }));
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private void startPhotoRecord() {

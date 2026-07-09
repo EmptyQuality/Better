@@ -28,6 +28,7 @@ import com.example.quality.count.CountCategory;
 import com.example.quality.count.CountCustomIcon;
 import com.example.quality.count.CountRepository;
 import com.example.quality.R;
+import com.example.quality.util.AppInsets;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 
 import java.io.IOException;
@@ -88,11 +89,14 @@ public class FragmentCategoryManage extends Fragment {
         LinearLayout page = vertical();
         page.setBackgroundColor(COLOR_BACKGROUND);
 
-        page.addView(buildHeader());
+        View header = buildHeader();
+        AppInsets.applySystemBarPadding(header, true, false);
+        page.addView(header);
 
         ScrollView scrollView = new ScrollView(requireContext());
         LinearLayout content = vertical();
         content.setPadding(dp(18), dp(16), dp(18), dp(96));
+        AppInsets.applySystemBarPadding(content, false, true);
         scrollView.addView(content);
         page.addView(scrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -279,24 +283,31 @@ public class FragmentCategoryManage extends Fragment {
         inputParams.setMargins(0, dp(14), 0, dp(14));
         sheet.addView(nameInput, inputParams);
 
-        TextView iconTitle = text("选择图标", 14, COLOR_MUTED, false);
-        sheet.addView(iconTitle);
-
+        LinearLayout iconArea = vertical();
+        sheet.addView(iconArea, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
         LinearLayout iconGrid = vertical();
         String[] selectedIcon = {
                 editing ? CategoryIconMapper.normalize(editingCategory.icon) : CategoryIconMapper.defaultIcon(currentType)
         };
-        LinearLayout.LayoutParams gridParams = matchWrap();
-        gridParams.setMargins(0, dp(10), 0, dp(14));
-        sheet.addView(iconGrid, gridParams);
+        iconArea.addView(iconScrollSection("选择图标", iconGrid), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                2
+        ));
         renderIconGrid(iconGrid, selectedIcon);
 
-        TextView addIconTitle = text("新增图标", 14, COLOR_MUTED, false);
-        sheet.addView(addIconTitle);
         LinearLayout customIconGrid = vertical();
-        LinearLayout.LayoutParams customGridParams = matchWrap();
-        customGridParams.setMargins(0, dp(10), 0, dp(18));
-        sheet.addView(customIconGrid, customGridParams);
+        LinearLayout.LayoutParams customSectionParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        );
+        customSectionParams.setMargins(0, dp(12), 0, dp(14));
+        iconArea.addView(iconScrollSection("新增图标", customIconGrid), customSectionParams);
         renderCustomIconGrid(customIconGrid, iconGrid, selectedIcon);
 
         TextView save = text(editing ? "保存修改" : "保存类别", 16, COLOR_TEXT, true);
@@ -308,8 +319,28 @@ public class FragmentCategoryManage extends Fragment {
                 dp(50)
         ));
 
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showFittedBottomSheet(dialog, sheet);
+    }
+
+    private View iconScrollSection(String titleText, LinearLayout grid) {
+        LinearLayout section = vertical();
+        TextView title = text(titleText, 14, COLOR_MUTED, false);
+        section.addView(title);
+
+        ScrollView scrollView = new ScrollView(requireContext());
+        scrollView.setClipToPadding(false);
+        scrollView.setFillViewport(false);
+        grid.setPadding(0, dp(6), 0, dp(4));
+        scrollView.addView(grid, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+        section.addView(scrollView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
+        return section;
     }
 
     private void renderIconGrid(LinearLayout iconGrid, String[] selectedIcon) {
@@ -466,8 +497,7 @@ public class FragmentCategoryManage extends Fragment {
             refreshPage();
             Toast.makeText(requireContext(), "图标已删除", Toast.LENGTH_SHORT).show();
         }));
-        dialog.setContentView(sheet);
-        dialog.show();
+        AppInsets.showScrollableBottomSheet(dialog, sheet);
     }
 
     private View actionRow(int iconResId, String title, String subtitle, View.OnClickListener listener) {

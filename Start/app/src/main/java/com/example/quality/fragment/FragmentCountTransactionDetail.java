@@ -22,6 +22,7 @@ import androidx.fragment.app.Fragment;
 import com.example.quality.count.CategoryIconMapper;
 import com.example.quality.count.CountRepository;
 import com.example.quality.count.CountTransaction;
+import com.example.quality.util.AppInsets;
 
 import java.io.File;
 import java.time.format.DateTimeFormatter;
@@ -72,11 +73,14 @@ public class FragmentCountTransactionDetail extends Fragment {
     private View buildContentView(@Nullable CountTransaction tx) {
         LinearLayout page = vertical();
         page.setBackgroundColor(COLOR_BACKGROUND);
-        page.addView(buildHeader());
+        View header = buildHeader();
+        AppInsets.applySystemBarPadding(header, true, false);
+        page.addView(header);
 
         ScrollView scrollView = new ScrollView(requireContext());
         LinearLayout content = vertical();
         content.setPadding(dp(18), dp(16), dp(18), dp(28));
+        AppInsets.applySystemBarPadding(content, false, true);
         scrollView.addView(content);
         page.addView(scrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,

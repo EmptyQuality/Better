@@ -26,6 +26,7 @@ import com.example.quality.count.CountRepository;
 import com.example.quality.count.CountSeriesPoint;
 import com.example.quality.count.CountStats;
 import com.example.quality.count.CountTransaction;
+import com.example.quality.util.AppInsets;
 import com.example.quality.util.LogUtil;
 
 import java.time.DayOfWeek;
@@ -92,6 +93,7 @@ public class FragmentCountStats extends Fragment {
         LinearLayout header = vertical();
         header.setBackgroundColor(COLOR_BEE);
         header.setPadding(dp(14), dp(10), dp(14), dp(16));
+        AppInsets.applySystemBarPadding(header, true, false);
 
         LinearLayout titleRow = horizontal();
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -131,6 +133,7 @@ public class FragmentCountStats extends Fragment {
         ScrollView scrollView = new ScrollView(requireContext());
         LinearLayout content = vertical();
         content.setPadding(dp(18), dp(14), dp(18), dp(92));
+        AppInsets.applySystemBarPadding(content, false, true);
         scrollView.addView(content);
         page.addView(scrollView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
