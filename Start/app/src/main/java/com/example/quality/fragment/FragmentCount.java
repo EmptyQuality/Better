@@ -1408,6 +1408,103 @@ public class FragmentCount extends Fragment {
         dayPicker.setMaxValue(maxDay);
     }
 
+    private void showBatchDeleteDialog() {
+        int currentYear = LocalDate.now().getYear();
+        NumberPicker startYearPicker = datePicker(2000, currentYear + 5);
+        NumberPicker startMonthPicker = datePicker(1, 12);
+        NumberPicker endYearPicker = datePicker(2000, currentYear + 5);
+        NumberPicker endMonthPicker = datePicker(1, 12);
+
+        startYearPicker.setValue(selectedMonth.getYear());
+        startMonthPicker.setValue(selectedMonth.getMonthValue());
+        endYearPicker.setValue(selectedMonth.getYear());
+        endMonthPicker.setValue(selectedMonth.getMonthValue());
+        startMonthPicker.setFormatter(value -> String.format(Locale.CHINA, "%02d", value));
+        endMonthPicker.setFormatter(value -> String.format(Locale.CHINA, "%02d", value));
+
+        LinearLayout content = vertical();
+        content.setPadding(dp(8), dp(12), dp(8), dp(4));
+        TextView hint = text("会删除所选月份范围内的全部记账记录，删除前会再次确认。", 13, COLOR_MUTED, false);
+        content.addView(hint);
+        content.addView(monthRangeRow("开始月份", startYearPicker, startMonthPicker));
+        content.addView(monthRangeRow("结束月份", endYearPicker, endMonthPicker));
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("批量删除记录")
+                .setView(content)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("下一步", (dialog, which) -> {
+                    YearMonth startMonth = YearMonth.of(startYearPicker.getValue(), startMonthPicker.getValue());
+                    YearMonth endMonth = YearMonth.of(endYearPicker.getValue(), endMonthPicker.getValue());
+                    if (startMonth.isAfter(endMonth)) {
+                        Toast.makeText(requireContext(), "开始月份不能晚于结束月份", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    confirmBatchDelete(startMonth, endMonth);
+                })
+                .show();
+    }
+
+    private View monthRangeRow(String label, NumberPicker yearPicker, NumberPicker monthPicker) {
+        LinearLayout row = vertical();
+        LinearLayout.LayoutParams rowParams = matchWrap();
+        rowParams.setMargins(0, dp(14), 0, 0);
+        row.setLayoutParams(rowParams);
+
+        TextView title = text(label, 14, COLOR_TEXT, true);
+        row.addView(title);
+
+        LinearLayout pickers = horizontal();
+        pickers.setGravity(Gravity.CENTER);
+        pickers.addView(compactPickerColumn(yearPicker, 98), new LinearLayout.LayoutParams(0, dp(128), 1));
+        pickers.addView(compactPickerColumn(monthPicker, 82), new LinearLayout.LayoutParams(0, dp(128), 1));
+        row.addView(pickers);
+        return row;
+    }
+
+    private void confirmBatchDelete(YearMonth startMonth, YearMonth endMonth) {
+        LocalDate start = startMonth.atDay(1);
+        LocalDate end = endMonth.plusMonths(1).atDay(1);
+        List<CountTransaction> transactions = repository.getTransactions(start, end);
+        if (transactions.isEmpty()) {
+            Toast.makeText(requireContext(), "该时间范围内没有记账记录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle("确认批量删除")
+                .setMessage("将删除 " + monthRangeText(startMonth, endMonth)
+                        + " 的 " + transactions.size() + " 条记账记录。此操作不可撤销。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", (dialog, which) -> {
+                    Set<String> imagePaths = new HashSet<>();
+                    for (CountTransaction tx : transactions) {
+                        imagePaths.addAll(tx.imagePaths);
+                    }
+                    int deleted = repository.deleteTransactions(start, end);
+                    for (String imagePath : imagePaths) {
+                        deleteImageFile(imagePath);
+                    }
+                    if (!selectedMonth.isBefore(start) && selectedMonth.isBefore(end)) {
+                        selectedMonth = start;
+                    }
+                    refreshMonthView();
+                    Toast.makeText(requireContext(), "已删除 " + deleted + " 条记账记录", Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    private String monthRangeText(YearMonth startMonth, YearMonth endMonth) {
+        return String.format(
+                Locale.CHINA,
+                "%d年%02d月 至 %d年%02d月",
+                startMonth.getYear(),
+                startMonth.getMonthValue(),
+                endMonth.getYear(),
+                endMonth.getMonthValue()
+        );
+    }
+
     private void confirmDeleteTransaction(CountTransaction tx) {
         new AlertDialog.Builder(requireContext())
                 .setTitle("删除记录")
@@ -2102,6 +2199,10 @@ public class FragmentCount extends Fragment {
         sheet.addView(actionSheetItem(R.drawable.ic_import, "导入 / 导出", "导入账单或导出备份数据", v -> {
             dialog.dismiss();
             showImportDialog();
+        }));
+        sheet.addView(actionSheetItem(R.drawable.ic_delete, "批量删除", "按年月范围删除记账记录", v -> {
+            dialog.dismiss();
+            showBatchDeleteDialog();
         }));
         sheet.addView(actionSheetItem("✓", "Quality 打卡", "切换到每日打卡", v -> {
             dialog.dismiss();

@@ -258,6 +258,32 @@ public class CountRepository {
         );
     }
 
+    public int deleteTransactions(LocalDate start, LocalDate end) {
+        SQLiteDatabase db = helper.getWritableDatabase();
+        String[] args = new String[]{
+                String.valueOf(toMillis(start)),
+                String.valueOf(toMillis(end))
+        };
+        db.beginTransaction();
+        try {
+            db.delete(
+                    CountDatabaseHelper.TABLE_TRANSACTION_IMAGES,
+                    "transaction_id IN (SELECT id FROM " + CountDatabaseHelper.TABLE_TRANSACTIONS
+                            + " WHERE happened_at >= ? AND happened_at < ?)",
+                    args
+            );
+            int deleted = db.delete(
+                    CountDatabaseHelper.TABLE_TRANSACTIONS,
+                    "happened_at >= ? AND happened_at < ?",
+                    args
+            );
+            db.setTransactionSuccessful();
+            return deleted;
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     public List<CountImage> getTransactionImages(long transactionId) {
         SQLiteDatabase db = helper.getReadableDatabase();
         List<CountImage> images = new ArrayList<>();
